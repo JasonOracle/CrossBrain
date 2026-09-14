@@ -1,0 +1,42 @@
+[package]
+name = "crossbrain"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "crossbrain_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 路径解析：铁律 L-02 指定唯一允许的 home 目录获取方式（禁止硬编码盘符）
+dirs = "5"
+# 时间戳生成：铁律 L-03 指定唯一允许的时间来源（禁止调用 shell date）
+chrono = { version = "0.4", features = ["serde"] }
+# 标记块匹配：Claude Code Adapter 用正则精准替换 <!-- CrossBrain:Start -->...<!-- CrossBrain:End -->
+# 区间，避免整体覆盖用户的 CLAUDE.md（铁律 L-01，见 TASK-06）
+regex = "1"
+# slug-hash 的内容指纹：SHA-256 前 3 字节（见 ARCHITECTURE.md 第 4 节 / TASK-07）
+sha2 = "0.10"
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

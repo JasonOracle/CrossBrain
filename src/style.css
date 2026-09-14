@@ -1,0 +1,49 @@
+/* CrossBrain 全局样式入口
+ * Tailwind CSS v4：不再需要 @tailwind base/components/utilities 三行指令，
+ * 也不需要 tailwind.config.js —— 配置写在 CSS 里（@theme 指令）。
+ * 详见 https://tailwindcss.com/docs/upgrade-guide
+ */
+@import "tailwindcss";
+
+/* ── 设计令牌（Tailwind v4 的配置方式） ────────────────────────
+ * 后续 UI 任务（TASK-10 起）统一从这里取色，禁止在组件里硬编码色值。
+ */
+@theme {
+  /* 品牌主色：沿用 Naive UI 默认 primary 色系，保证与组件库一致 */
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #d9e6ff;
+  --color-brand-200: #bcd3ff;
+  --color-brand-300: #8eb6ff;
+  --color-brand-400: #598eff;
+  --color-brand-500: #3366ff;
+  --color-brand-600: #1f47eb;
+  --color-brand-700: #1736be;
+  --color-brand-800: #173099;
+  --color-brand-900: #182e79;
+
+  /* 语义色：涨红跌绿不适用（工具类应用），此处只定义状态色 */
+  --color-success-500: #18a058;
+  --color-warning-500: #f0a020;
+  --color-error-500: #d03050;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    Inter,
+    Avenir,
+    "Helvetica Neue",
+    Helvetica,
+    Arial,
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
