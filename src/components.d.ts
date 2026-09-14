@@ -16,6 +16,7 @@ declare module 'vue' {
     NButton: typeof import('naive-ui')['NButton']
     NConfigProvider: typeof import('naive-ui')['NConfigProvider']
     NInput: typeof import('naive-ui')['NInput']
+    NMessageProvider: typeof import('naive-ui')['NMessageProvider']
     NModal: typeof import('naive-ui')['NModal']
     NResult: typeof import('naive-ui')['NResult']
     NSpin: typeof import('naive-ui')['NSpin']
@@ -24,5 +25,6 @@ declare module 'vue' {
     NTabPane: typeof import('naive-ui')['NTabPane']
     NTabs: typeof import('naive-ui')['NTabs']
     NTag: typeof import('naive-ui')['NTag']
+    RuleEditor: typeof import('./components/RuleEditor.vue')['default']
   }
 }

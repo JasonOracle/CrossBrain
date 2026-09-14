@@ -38,6 +38,7 @@ import {
 } from "../api";
 import LinkNoticeDialog from "../components/LinkNoticeDialog.vue";
 import { useLinkNotice } from "../composables/useLinkNotice";
+import { RULE_TEMPLATES } from "../composables/useRuleEditor";
 
 /** 启动状态：只需其中的「断链说明是否已展示过」 */
 const props = defineProps<{ startup: StartupState | null }>();
@@ -87,63 +88,12 @@ const online = ref(typeof navigator === "undefined" ? true : navigator.onLine);
 
 // ============================================================================
 // 规则模板（PRD 第 5 节步骤 3）
+//
+// 正文不在本文件里：主工作台的规则编辑器（TASK-11）用同一组模板，
+// 复制一份迟早分叉，所以统一取自 `useRuleEditor.ts` 的导出常量。
 // ============================================================================
 
-const templates = [
-  {
-    name: "前端工程师",
-    body: `# 我的工作偏好
-
-## 沟通
-- 用中文回答，先给结论，再给理由
-- 改动代码时给出完整可运行的片段，不要只说「在这里改一下」
-
-## 技术栈
-- Vue 3 + TypeScript，组合式 API
-- Tailwind CSS：优先用工具类，不轻易新增自定义 CSS
-- 包管理统一用 pnpm
-
-## 请特别注意
-- 不确定的 API 直接说不确定，不要编造
-- 改动涉及依赖升级时，先说明影响面再动手
-`,
-  },
-  {
-    name: "后端 / 全栈开发者",
-    body: `# 我的工作偏好
-
-## 沟通
-- 用中文回答，先给结论，再给理由
-- 遇到多种可行方案时列出取舍，而不是直接替我决定
-
-## 技术栈
-- 服务端：Node.js / Python，接口遵循 REST 约定
-- 数据库：关系型优先，写查询时注意索引与 N+1 问题
-- 部署：容器化，配置全部走环境变量
-
-## 请特别注意
-- 涉及数据迁移或删除的改动，先说明风险再动手
-- 报错信息要能定位问题，但不要外泄敏感数据
-`,
-  },
-  {
-    name: "通用开发者",
-    body: `# 我的工作偏好
-
-## 沟通
-- 用中文回答，先给结论，再给理由
-- 不确定的地方直接说不确定，不要编造
-
-## 工作方式
-- 动手前先说明打算怎么做，完成后说明改了哪些文件
-- 优先小步改动，一次只解决一个问题
-
-## 代码质量
-- 命名要表达意图，注释解释「为什么」而不是「做了什么」
-- 不引入没有必要的依赖
-`,
-  },
-];
+const templates = RULE_TEMPLATES;
 
 /** 步骤 5 的验证提示词 */
 const VERIFY_PROMPT = "请用一句话概括你当前遵守的全局编码偏好。";

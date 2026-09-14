@@ -108,6 +108,24 @@ fn main() {
         count_entries(&fake_claude.join("skills"))
     );
 
+    // ⚠️ 副本的**预状态**决定断言走哪条分支。
+    //
+    // 早期版本假设真实 CLAUDE.md 从未同步过（首注场景），据此断言
+    // 「备份 == 同步前的原始内容」。2026-09-15 用户真机同步过一次后，
+    // 真实文件已带标记块，这个假设永久失效——干跑从此全红。
+    //
+    // 两种预状态的**不变式不同**，都必须验证：
+    //   首次注入 → 备份是这次新建的，内容 = 注入前的原始文件
+    //   已注入过 → 备份是历史干净快照，同步（更新分支）绝不能碰它（ADR-15）
+    let had_marker_pre = original_claude_md.contains("<!-- CrossBrain:Start -->");
+    let backup_pre_path = fake_claude.join("CLAUDE.md.crossbrain-backup");
+    let backup_pre = fs::read_to_string(&backup_pre_path).ok();
+    println!(
+        "   · 副本预状态：{}｜备份文件：{}",
+        if had_marker_pre { "已注入过标记块（走更新分支）" } else { "未注入过标记块（走首注分支）" },
+        if backup_pre.is_some() { "已存在" } else { "不存在" }
+    );
+
     // 副本 skills/ 下**用户自建内容**的清单（跑完后必须一模一样）。
     // 不硬编码技能名：用户随时可能增删自己的技能，写死名字只会造成假失败。
     let skills_targets: Vec<(&str, PathBuf)> = vec![
@@ -215,10 +233,20 @@ fn main() {
         "CLAUDE.md 原有内容保留（标记块外未被覆盖）",
     );
     let backup = fake_claude.join("CLAUDE.md.crossbrain-backup");
-    c.check(
-        fs::read_to_string(&backup).unwrap_or_default() == original_claude_md,
-        "备份文件与原始 CLAUDE.md 完全一致",
-    );
+    let backup_after = fs::read_to_string(&backup).ok();
+    if had_marker_pre {
+        // 更新分支：备份在首注时就建好了，同步只是改标记块内容——备份一字不动
+        c.check(
+            backup_pre.is_some() && backup_after == backup_pre,
+            "更新分支：同步不覆盖既有备份（跑前跑后一字不变，ADR-15）",
+        );
+    } else {
+        // 首注分支：这次同步新建了备份，内容必须是注入前的原始文件
+        c.check(
+            backup_after.as_deref() == Some(original_claude_md.as_str()),
+            "首注分支：备份内容等于注入前的原始 CLAUDE.md",
+        );
+    }
 
     let l0 = fake_gemini.join("rules").join("crossbrain-L0.md");
     c.check(
@@ -439,10 +467,17 @@ fn main() {
     }
     let restored = fs::read_to_string(fake_claude.join("CLAUDE.md")).unwrap_or_default();
     c.check(restored == backup_before, "还原后的内容必须等于备份内容");
-    c.check(
-        restored == original_claude_md,
-        "还原后的内容必须等于同步前的原始内容",
-    );
+    if had_marker_pre {
+        // 真机同步过：备份是「历史干净快照」，而同步前的原始内容已带标记块，
+        // 两者本来就不同——「还原后 == 原始内容」只对首注场景成立。
+        // 更新场景要保证的（还原写入的确实是备份内容）上一条已经断过了。
+        println!("   · 预状态已注入过标记块——还原恢复的是历史备份，跳过「等于原始内容」断言");
+    } else {
+        c.check(
+            restored == original_claude_md,
+            "还原后的内容必须等于同步前的原始内容",
+        );
+    }
     c.check(
         fs::read_to_string(&backup_file).unwrap_or_default() == backup_before,
         "备份在还原后必须一字不变（它是唯一干净快照）",
@@ -604,6 +639,13 @@ fn copy_codex_subset(src: &Path, dst: &Path) -> std::io::Result<()> {
     let agents = src.join("AGENTS.md");
     if agents.is_file() {
         fs::copy(&agents, dst.join("AGENTS.md"))?;
+    }
+
+    // 备份也要带上：真机上它真实存在（首注时创建），
+    // 副本里缺了它，「备份与还原」区看到的就不是一个真实的状态。
+    let backup = src.join("AGENTS.md.crossbrain-backup");
+    if backup.is_file() {
+        fs::copy(&backup, dst.join("AGENTS.md.crossbrain-backup"))?;
     }
 
     let skills = src.join("skills");

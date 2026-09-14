@@ -56,27 +56,34 @@ function reloadApp() {
 
 <template>
   <n-config-provider :theme-overrides="themeOverrides">
-    <!-- 启动瞬间：读取本机状态（通常只有几十毫秒） -->
-    <div
-      v-if="loading"
-      class="flex min-h-screen items-center justify-center bg-neutral-50"
-    >
-      <n-spin size="medium" />
-    </div>
+    <!--
+      消息提示的挂载点（TASK-11）。
+      必须包在所有视图外层：`useMessage()` 只在 provider 内部的组件里可用，
+      放进某个 v-if 分支会让另一分支里的调用直接报错。
+    -->
+    <n-message-provider>
+      <!-- 启动瞬间：读取本机状态（通常只有几十毫秒） -->
+      <div
+        v-if="loading"
+        class="flex min-h-screen items-center justify-center bg-neutral-50"
+      >
+        <n-spin size="medium" />
+      </div>
 
-    <!-- 连本机状态都读不出来：明确告知，而不是留一片白屏 -->
-    <div
-      v-else-if="loadError"
-      class="flex min-h-screen items-center justify-center bg-neutral-50 p-8"
-    >
-      <n-result status="warning" title="无法启动" :description="loadError">
-        <template #footer>
-          <n-button @click="reloadApp">重试</n-button>
-        </template>
-      </n-result>
-    </div>
+      <!-- 连本机状态都读不出来：明确告知，而不是留一片白屏 -->
+      <div
+        v-else-if="loadError"
+        class="flex min-h-screen items-center justify-center bg-neutral-50 p-8"
+      >
+        <n-result status="warning" title="无法启动" :description="loadError">
+          <template #footer>
+            <n-button @click="reloadApp">重试</n-button>
+          </template>
+        </n-result>
+      </div>
 
-    <WizardView v-else-if="firstRun" :startup="startup" @done="onWizardDone" />
-    <MainView v-else :startup="startup" />
+      <WizardView v-else-if="firstRun" :startup="startup" @done="onWizardDone" />
+      <MainView v-else :startup="startup" />
+    </n-message-provider>
   </n-config-provider>
 </template>

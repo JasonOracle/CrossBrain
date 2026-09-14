@@ -1680,6 +1680,130 @@ pub fn is_git_available() -> bool {
 [ ] 文件内容持久化到 ~/.ai-profile/global/rules.md
 ```
 
+#### ⚠️ 实施修正（2026-09-15 00:55，TASK-11）
+
+原文只有 4 行验收项，以下 10 处是动手时必须补上的。前 3 条是**安全/数据安全**，
+中 4 条是**交互正确性**，后 3 条是**实现选型**。
+
+1. **验收项自相矛盾，按主句实现**。「编辑区和预览区同时可见」与「切换 Tab 均可」
+   不能并存（切 Tab 就不可能同时可见）。按主句做**左右分栏**。
+   预览**只在主工作台做**：PRD 第 5 节步骤 3 没要求向导带预览，
+   向导是 `max-w-3xl` 窄栏，硬塞分栏只会挤坏已验收的布局。
+
+2. **安全缺口：预览渲染器 + `csp: null`**。原文没提「预览怎么渲染」，
+   而 `tauri.conf.json` 目前 `csp: null`——若把用户内容里的 `<script>` /
+   `onerror` 当真标签插进 DOM，脚本会在 webview 里执行，
+   而 webview 拥有 `invoke` 权限，**等同本地文件任意读写**。
+   选型 **markdown-it**（默认 `html: false`，原始 HTML 被转义成纯文本，已实测
+   `<b>` → `&lt;b&gt;`），因此无需再叠 sanitizer；并用
+   `ipc_contract::markdown_preview_must_escape_raw_html` 锁死「不许打开 html 开关」。
+   选它而不是 `marked` + `dompurify` 的原因：后者是 2 个依赖还得记得叠 sanitizer，
+   漏一处就是 XSS；前者 1 个依赖且默认安全。
+
+3. **预览区链接必须禁止真的跳转**。webview 里导航会把整个应用带离界面。
+   组件里用 `@click.capture` 拦截点击（`preventDefault`），
+   样式上仍显示为链接但不改 `cursor`——预览不是浏览器。
+
+4. **模板复用与覆盖风险**。三条规则模板 60 行字符串，向导与主工作台各写一份必然分叉
+   → 抽成 `useRuleEditor.ts` 导出的 `RULE_TEMPLATES` 常量，两处共用。
+   **主工作台里模板入口只在内容为空时显示**：模板一点就整篇替换，
+   在向导里是「帮你起步」，在主工作台是**静默覆盖用户已保存的规则**（数据丢失）。
+   用「空白才显示」从机制上消灭误触，而不是靠确认弹窗兜底。
+
+5. **Naive UI Tab 默认会卸载面板**。`n-tab-pane` 默认 `display-directive="if"`，
+   切走 Tab 即卸载——「全局规则」里没保存的修改会**跟着丢**。
+   三个面板全部改为 `display-directive="show:lazy"`（首次进入才渲染、之后常驻）。
+
+6. **「未保存」按内容基线判断，不按「敲过键盘」**。`dirty = content !== baseline`
+   （baseline = 与磁盘一致的内容）。用户改了又改回原样不算未保存；
+   同时天然满足向导「没动过就不写盘」的老约束，比 `rulesTouched` 布尔标记更准确。
+
+7. **读取失败必须禁用保存（读不出来 ≠ 空）**。原向导对读取失败是
+   `catch {}` 后当作空内容继续——放行的话，用户会把一份空文件覆盖到自己的规则上，
+   不可逆。改为：`baseline` 未建立前编辑与保存都停用，界面给出原因与重试入口。
+   与 ADR-14「SSOT 读取失败即中止」同一条原则。
+
+8. **Toast 需要 provider**。`useMessage()` 只在 `<n-message-provider>` 内部可用，
+   该 provider 必须包在 `n-config-provider` 下**所有视图**外层——
+   放进某个 `v-if` 分支会让另一分支的调用直接报错。
+
+9. **编辑框用原生 `<textarea>` 而非 `n-input`**。分栏要求两个窗格共用固定高度、
+   各自滚动；`n-input` 的 textarea 高度由其内部样式决定，要撑满 flex 窗格得和
+   组件内部结构较劲。原生元素 + Tailwind 类完全可控，焦点态对齐项目令牌。
+
+10. **保存入口 = 按钮 + Ctrl/Cmd+S**，快捷键绑在 textarea 上（而非 window）：
+    组件常驻（见第 5 条）后 window 级监听在设置页也会触发；绑在编辑框上则天然限定作用域，
+    并 `preventDefault` 掉浏览器默认的「存储网页」。
+
+#### ✅ 实施记录（2026-09-15 00:55，TASK-11）
+
+**交付文件**
+
+| 文件 | 内容 |
+|:---|:---|
+| `src/composables/useRuleEditor.ts`（新） | 读写状态机（`content` / `baseline` / `dirty` / `load` / `save`）+ `RULE_TEMPLATES` + markdown-it 单例与 `previewHtml` |
+| `src/components/RuleEditor.vue`（新） | 左右分栏编辑器：状态条 / 模板入口（空白时）/ 原生 textarea / 预览窗格 / Ctrl+S |
+| `src/views/MainView.vue`（改） | 「全局规则」Tab 接入 `RuleEditor`，Toast 提示；三个 Tab 改 `show:lazy` |
+| `src/views/WizardView.vue`（改） | 步骤 3 的内联模板数组改为引用 `RULE_TEMPLATES`（60 行字符串不再复制） |
+| `src/App.vue`（改） | 加 `<n-message-provider>` 包住所有视图 |
+| `src/style.css`（改） | 新增 `.md-preview` 排版（标题/列表/代码/引用/表格，色值全走令牌；v-html 内容不受 scoped 样式影响，必须放全局） |
+| `package.json`（改） | 新增 `markdown-it 15.0.2` + `@types/markdown-it 14.2.0`（devDep） |
+| `src-tauri/tests/ipc_contract.rs`（改） | 新增 2 条契约测试；`RuleEditor.vue` 加入界面术语检查清单 |
+| `src-tauri/examples/dryrun_sync.rs`（改） | 干跑预状态自适应（见下方「连带修复」） |
+
+**新增契约测试（3 条，全部反向验证过）**
+
+| 测试 | 锁住的约束 |
+|:---|:---|
+| `rule_editor_saving_never_triggers_sync` | `useRuleEditor.ts` / `RuleEditor.vue` 里**不得出现** `runSync`，且保存链路确实接了 `saveGlobalRules`（防止前一条恒为真） |
+| `markdown_preview_must_escape_raw_html` | markdown-it 实例存在，且源码里不得出现 `html: true`（空白归一后比对，`html:true` 也逃不掉） |
+| `wizard_copy_has_no_internal_terms`（扩围） | `RuleEditor.vue` 加入面向用户文件清单 |
+
+> 反向验证记录：故意把 `html: true` + 一处 `runSync` 塞回 `useRuleEditor.ts`、
+> 把 `slug` 塞进 `RuleEditor.vue` 模板 → 三条测试**全部如期失败**；还原后复跑全绿。
+> 这条习惯（TASK-19 起约定）继续保持。
+
+**连带修复（同一轮发现，不属于 TASK-11 本体）**
+
+`dryrun_sync` 第 [6]/[11] 节的两个断言假设「真实 CLAUDE.md 从未同步过」。
+2026-09-15 00:18 用户真机同步过一次，假设永久失效 → 干跑出现 2 项假失败。
+已改为**预状态自适应**：跑之前先探测副本是否已含标记块与备份，
+据此走「首注分支」（备份 == 注入前的原始文件）或「更新分支」
+（同步绝不改写既有备份，ADR-15 的真正不变式）。
+顺带修了 `copy_codex_subset` 不复制 `AGENTS.md.crossbrain-backup` 的保真度缺口。
+
+**真实机首测（用户 00:18 的真机同步，结果全部符合设计）**
+
+| 检查 | 结果 |
+|:---|:---|
+| 断链范围 | `~/.claude/CLAUDE.md` **links=5 → 1**；其余 4 路仍共享同一 inode（links=4，md5 全等 `47645f60…`）——只断了 CLAUDE.md 侧（D-03）✅ |
+| 用户内容 | CLAUDE.md 的 1908 字节原文（标记块外）完整保留；`.crossbrain-backup` 仍是原始内容 ✅ |
+| Codex | `AGENTS.md` 0 字节 → 579 字节（标记块 + 内联全文），备份为 0 字节原始件 ✅ |
+| L0 | `~/.gemini/config/rules/crossbrain-L0.md` 444 字节写入 ✅ |
+| 快照 | 真实目录 2949 项跑前跑后逐项一致（干跑只碰副本）✅ |
+
+**实测命令与结果（2026-09-15 00:55）**
+
+| 命令 | 结果 |
+|:---|:---|
+| `pnpm build`（vue-tsc + vite） | 零报错；产物 477 KB（gzip 159 KB，较 TASK-19 +115 KB，来自 markdown-it） |
+| `cargo test` | **120 passed / 0 failed / 0 warning**（较 TASK-19 的 118 + 2） |
+| `cargo run --example dryrun_sync` | **0 项检查未通过**（含真实目录 2949 项零改动） |
+| 真实数据回归 | 5 路硬链接组 md5 一致（`47645f60…`，links=4+1）、`rules.md` md5 `f0b10675…` 零改动 |
+
+**交给后续任务的约束**
+
+1. **每新增一个面向用户的界面文件，都要加进** `wizard_copy_has_no_internal_terms`
+   的 `user_facing` 列表（本次已加 `RuleEditor.vue`）。
+2. **`csp: null` 仍是隐患**：预览已转义，但收紧 CSP 属于纵深防御，建议独立小任务处理；
+   任何「往预览区渲染用户/远端内容」的新功能都必须先过这条。
+3. **切换 Tab 不拦截未保存修改**（`show:lazy` 保内容不丢，但用户可能不知道没保存）。
+   「离开未保存提醒」可与 TASK-13/14 一并考虑。
+4. **`n-message-provider` 必须保持在所有视图外层**——删掉它，`useMessage()` 的调用点
+   会在运行时报错且 `pnpm build` 看不出来。
+5. **TASK-12 的技能编辑器应直接复用** `useRuleEditor` 的基线/dirty 思路与
+   `.md-preview` 样式；2000 字警告条的插入点是 `RuleEditor.vue` 的工具条区域。
+
 ### TASK-12：技能知识卡片列表
 
 #### ✅ 验收检查清单

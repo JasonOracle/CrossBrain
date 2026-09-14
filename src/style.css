@@ -47,3 +47,100 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ── Markdown 预览区排版（TASK-11）─────────────────────────────
+ * 预览的 HTML 是 v-html 注入的，**scoped 样式对它无效**，必须放全局。
+ * 只覆盖用户规则里会出现的元素；色值一律用上面的令牌，不另起一套。
+ * 内容来自 markdown-it 且 html:false（原始 HTML 已转义），见 useRuleEditor.ts。
+ */
+.md-preview {
+  @apply text-sm leading-7 text-neutral-700;
+}
+
+.md-preview > :first-child {
+  margin-top: 0;
+}
+.md-preview > :last-child {
+  margin-bottom: 0;
+}
+
+.md-preview h1,
+.md-preview h2,
+.md-preview h3,
+.md-preview h4 {
+  @apply mt-6 mb-3 font-semibold text-neutral-900;
+}
+.md-preview h1 {
+  @apply text-xl;
+}
+.md-preview h2 {
+  @apply text-lg;
+}
+.md-preview h3 {
+  @apply text-base;
+}
+.md-preview h4 {
+  @apply text-sm;
+}
+
+.md-preview p {
+  @apply my-3;
+}
+
+.md-preview ul,
+.md-preview ol {
+  @apply my-3 flex flex-col gap-1.5 pl-6;
+}
+.md-preview ul {
+  @apply list-disc;
+}
+.md-preview ol {
+  @apply list-decimal;
+}
+.md-preview li > ul,
+.md-preview li > ol {
+  @apply my-1.5;
+}
+
+.md-preview strong {
+  @apply font-semibold text-neutral-900;
+}
+
+.md-preview code {
+  @apply rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-[0.85em] text-neutral-800;
+}
+.md-preview pre {
+  @apply my-3 overflow-auto rounded-lg bg-neutral-900 p-4;
+}
+.md-preview pre code {
+  @apply bg-transparent p-0 text-neutral-100;
+}
+
+.md-preview blockquote {
+  @apply my-3 border-l-4 border-brand-200 bg-brand-50/60 px-4 py-2 text-neutral-600;
+}
+
+.md-preview hr {
+  @apply my-5 border-neutral-200;
+}
+
+.md-preview a {
+  @apply text-brand-500 underline decoration-brand-200 underline-offset-2;
+}
+/* 预览不是浏览器：链接一律不可真的点进去（点击行为已在组件里拦截），
+   这里只负责让它看起来仍是个链接 */
+.md-preview a {
+  cursor: default;
+}
+
+.md-preview table {
+  @apply my-3 w-full border-collapse text-xs;
+}
+.md-preview th,
+.md-preview td {
+  @apply border border-neutral-200 px-3 py-1.5 text-left;
+}
+.md-preview th {
+  @apply bg-neutral-50 font-medium text-neutral-900;
+}
+

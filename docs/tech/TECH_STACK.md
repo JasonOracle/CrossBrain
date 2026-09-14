@@ -14,6 +14,7 @@
 | 样式系统 | **Tailwind CSS** | **v4.x**（实测 4.3.3） | 原子化样式，约束设计一致性。**v4 用 `@tailwindcss/vite` 插件，无 `tailwind.config.js`** |
 | UI 组件库 | **Naive UI** | 最新稳定版 | 完善的 Vue 3 原生组件支持 |
 | 图标方案 | **SVG（unplugin-icons / 本地 SVG）** | unplugin-icons 24.x | **严禁使用 Emoji 作为功能图标**；图标集（lucide）本地安装，构建不联网 |
+| Markdown 渲染 | **`markdown-it`**（实测 15.0.2） | — | 预览区用（TASK-11）。**必须保持默认 `html: false`**：原始 HTML 被转义为纯文本，无需额外 sanitizer。**严禁打开 `html` 开关** —— `tauri.conf.json` 当前 `csp: null`，渲染原始 HTML 会让脚本在 webview 内执行，而 webview 有 `invoke` 权限，等同本地文件任意读写；`ipc_contract::markdown_preview_must_escape_raw_html` 已锁死 |
 | 系统路径处理 | **`dirs` crate** | — | 跨平台 home 目录解析，禁止字符串拼接路径 |
 | 时间处理 | **`chrono` crate** | — | 生成 ISO-8601 时间戳，**严禁调用 shell `date` 命令** |
 | 包管理器 | **pnpm** | v8.x+ | **强制使用，禁止 npm / yarn** |

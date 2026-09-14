@@ -214,6 +214,8 @@ fn wizard_copy_has_no_internal_terms() {
         "src/views/WizardView.vue",
         "src/views/MainView.vue",
         "src/components/LinkNoticeDialog.vue",
+        // TASK-11：全局规则编辑器（挂载在主工作台的 Tab 里）
+        "src/components/RuleEditor.vue",
     ];
 
     for rel in user_facing {
@@ -275,5 +277,70 @@ fn link_notice_is_marked_only_after_confirm() {
         code.matches("markLinkNoticeShown(").count(),
         1,
         "标记调用应只有一处且位于 confirm() 内——多处意味着存在别的时机也会落标记"
+    );
+}
+
+/// 保存全局规则**绝不**顺带触发同步（TASK-11 / PRD §6.1）。
+///
+/// # 为什么单独锁这一条
+///
+/// 「编辑」与「同步」是两个独立动作，混在一起的实际后果是：
+/// 用户只是想存个草稿，却把自己的 `CLAUDE.md` 等文件全改了一遍——
+/// 而 TASK-19 恰恰花大力气把「每次改动都有备份、可还原」做出来，
+/// 让保存去触发同步等于把这些不可逆副作用全部重新暴露出来。
+///
+/// 断言范围是**规则编辑器自己的两个文件**（状态机 + 组件），
+/// 而不是 `MainView.vue` —— 主工作台里「立即同步」是合法的，
+/// 在那个文件上做全文禁止会误伤。
+#[test]
+fn rule_editor_saving_never_triggers_sync() {
+    for rel in [
+        "src/composables/useRuleEditor.ts",
+        "src/components/RuleEditor.vue",
+    ] {
+        let code = strip_line_comments(&repo_file(rel));
+        assert!(
+            !code.contains("runSync"),
+            "{rel} 里出现了 runSync —— 保存动作会顺带触发同步，\
+             违背「编辑与同步是两个独立动作」（PRD §6.1）"
+        );
+    }
+
+    // 反向护栏：上面是「不允许出现」，若编辑器根本没接保存命令，
+    // 前一条恒为真。这里确认保存调用确实存在。
+    let code = strip_line_comments(&repo_file("src/composables/useRuleEditor.ts"));
+    assert!(
+        code.contains("saveGlobalRules("),
+        "useRuleEditor 里找不到 saveGlobalRules 调用——保存链路断了，\
+         上面的「不触发同步」断言会因此恒为真"
+    );
+}
+
+/// 预览必须**转义**原始 HTML，而不是照原样插进 DOM（TASK-11）。
+///
+/// # 为什么这不是洁癖
+///
+/// `tauri.conf.json` 目前 `csp: null`。若预览把用户内容里的
+/// `<script>` / `onerror` 当真标签插入，脚本会在 webview 里执行，
+/// 而 webview 拥有 `invoke` 权限——等同本地文件任意读写。
+/// markdown-it 默认 `html: false` 会把原始 HTML 转成纯文本（已实测），
+/// 所以这里锁的就是「别有人图省事把这个开关打开」。
+#[test]
+fn markdown_preview_must_escape_raw_html() {
+    let code = strip_line_comments(&repo_file("src/composables/useRuleEditor.ts"));
+
+    // 先确认渲染器确实接上了，否则下面的断言恒为真
+    assert!(
+        code.contains("MarkdownIt("),
+        "useRuleEditor 里找不到 MarkdownIt 实例——预览渲染链路断了"
+    );
+
+    // 去掉所有空白再比对，`html: true` / `html:true` 都逃不掉
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        !compact.contains("html:true"),
+        "markdown-it 的 html 选项被打开了——预览会把原始 HTML 插进 DOM，\
+         而当前 CSP 为 null，脚本会在 webview 里执行。\
+         若确需打开，必须同时补 CSP 与 sanitizer，并更新本测试"
     );
 }

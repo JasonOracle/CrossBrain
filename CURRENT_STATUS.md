@@ -9,10 +9,10 @@
 
 | 项目 | 状态 |
 |:---|:---|
-| **当前阶段** | 🔄 **第 3 阶段：前端控制台** — TASK-01~08 ✅、TASK-09 ⏸️ 暂缓、**TASK-10 ✅**、**TASK-18 ✅（增补：Codex 接入，含第二轮修正 + Spike 闭环）**、**TASK-19 ✅（增补：改动知情与可逆）**，进入 TASK-11 |
+| **当前阶段** | 🔄 **第 3 阶段：前端控制台** — TASK-01~08 ✅、TASK-09 ⏸️ 暂缓、**TASK-10 ✅**、**TASK-18 ✅（增补：Codex 接入，含第二轮修正 + Spike 闭环）**、**TASK-19 ✅（增补：改动知情与可逆）**、**TASK-11 ✅（全局规则编辑器）**，进入 TASK-12 |
 | **当前日期** | 2026-09-15 |
 | **计划交付** | 2026-09-28（两周） |
-| **下一个任务** | `TASK-11`：全局规则编辑器工作台（Markdown 编辑 + 实时预览）——TASK-11 原顺延至 TASK-19 之后，现已解除<br>✅ `TASK-19`（P1，数据安全红线）**已于 2026-09-15 00:10 完成**：断链首次同步前告知 + 备份一键还原<br>✅ 原挂的「Codex 真实 Spike」**已于 2026-09-14 23:4x 完成闭环**（L0/L2/作用域三项全通过） |
+| **下一个任务** | `TASK-12`：技能知识卡片列表（新建 / 编辑 / 删除，超 2000 字警告）——应复用 `useRuleEditor` 的基线/dirty 思路与 `.md-preview` 样式<br>✅ `TASK-11` **已于 2026-09-15 00:55 完成**：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原<br>✅ **版本控制已接入**（2026-09-15 00:20）：远端 `git@github.com:JasonOracle/CrossBrain.git`，约定「一个 task 一个提交」 |
 | **环境状态** | ✅ Rust 1.98.1 (MSVC) + VS Build Tools 2022；`~/.ai-profile/` SSOT 底座就绪；**IPC 层已打通，首次运行向导已端到端验证**；**支持工具数 2 → 3**（Claude Code / Antigravity IDE / Codex） |
 
 ---
@@ -206,7 +206,15 @@
 ### 第 3 阶段：前端控制台（Day 6 - Day 8）
 
 - ✅ **TASK-10**：首次启动 5 步向导 UI（工具检测 → 规则填写 → 同步 → 验证）（2026-09-14 完成）
-- 🔲 **TASK-11**：全局规则编辑器工作台（Markdown 编辑 + 实时预览）
+- ✅ **TASK-11**：全局规则编辑器工作台（Markdown 编辑 + 实时预览）（2026-09-15 00:55 完成）
+  - 左右分栏（编辑 + 预览同时可见）；保存与同步严格分离，契约测试锁死「保存不触发同步」
+  - **安全要点**：预览渲染选 markdown-it（默认 `html:false` 转义原始 HTML）——
+    `tauri.conf.json` 的 `csp: null` 下，渲染原始 HTML 等于把 webview 的
+    `invoke` 权限交给任意脚本；`markdown_preview_must_escape_raw_html` 锁死这个开关
+  - 连带发现并修复：**用户 00:18 的真机同步推翻了干跑「从未同步过」的假设**，
+    干跑改为预状态自适应（首注 / 更新两分支各自的不变式）
+  - 详见 `TASK_BREAKDOWN.md` TASK-11「实施修正 10 条 + 实施记录」
+
 - 🔲 **TASK-12**：技能知识卡片列表（新建 / 编辑 / 删除，超 2000 字警告）
 - 🔲 **TASK-13**：同步状态栏 + 「立即同步」按钮（含离线模式指示）
 - 🔲 **TASK-14**：设置页「一键卸载 / 去痕」功能
@@ -304,6 +312,49 @@
 > - 修改了文件：列出所有修改过的文件
 > - 注意事项：如果遇到了坑或做了特殊决定，在这里说明
 > ```
+
+---
+
+### 2026-09-15 00:55:35 — WorkBuddy（DeepSeek-V4.1-Flash）
+
+- 完成了：**`TASK-11` 全局规则编辑器工作台（左右分栏 + 实时预览）—— 代码 + 测试 + 前端 + 文档全部落地**
+  - 左右分栏（编辑与预览同时可见）；保存与同步严格分离（契约测试
+    `rule_editor_saving_never_triggers_sync` 锁死，**反向验证过**）；
+    保存成功走轻提示 Toast（`n-message-provider` 包住所有视图），不是弹窗
+  - **安全要点**：预览渲染选 markdown-it（默认 `html:false`，原始 HTML 被转义）。
+    `tauri.conf.json` 的 `csp: null` 下若渲染原始 HTML，脚本可在 webview 内执行，
+    而 webview 有 `invoke` 权限，等同本地文件任意读写；
+    `markdown_preview_must_escape_raw_html` 锁死「不许打开 html 开关」
+  - **交互正确性**：三个 Tab 改 `display-directive="show:lazy"`（Naive UI 默认 `if`
+    会在切 Tab 时卸载面板 → 未保存修改丢失）；「未保存」按内容基线判断
+    （改了又改回原样不算）；**读取失败禁用保存**（读不出来 ≠ 空，与 ADR-14 同源）；
+    模板入口只在内容为空时出现（主工作台里一键套模板 = 静默覆盖用户规则）
+  - **连带修复**：用户 00:18 真机同步推翻了干跑「从未同步过」的假设（2 项假失败），
+    干跑改为预状态自适应（首注 / 更新分支各自的不变式）；
+    顺带修了 `copy_codex_subset` 不复制 Codex 备份文件的保真度缺口
+  - **真实机首测（用户真机同步，全部符合设计）**：断链只断 CLAUDE.md 侧
+    （links=5 → 1+4，其余 4 路 md5 全等）、用户 1908 字节原文与备份完好、
+    Codex 0 → 579 字节、L0 444 字节、真实目录 2949 项零改动
+- 修改了文件：
+  - 新建 `src/composables/useRuleEditor.ts`（读写状态机 + `RULE_TEMPLATES` + markdown-it 单例）
+  - 新建 `src/components/RuleEditor.vue`（左右分栏编辑器）
+  - 修改 `src/views/MainView.vue`（接入编辑器 + Toast；Tab 改 `show:lazy`）
+  - 修改 `src/views/WizardView.vue`（步骤 3 模板改为引用共享常量，60 行字符串不再复制）
+  - 修改 `src/App.vue`（`<n-message-provider>` 包住所有视图）
+  - 修改 `src/style.css`（`.md-preview` 排版；v-html 内容不受 scoped 样式影响，必须放全局）
+  - 修改 `package.json`（新增 `markdown-it 15.0.2` + `@types/markdown-it`）
+  - 修改 `src-tauri/tests/ipc_contract.rs`（新增 2 条契约测试 + 术语检查扩围）
+  - 修改 `src-tauri/examples/dryrun_sync.rs`（预状态自适应 + Codex 备份复制）
+  - 修改 `docs/tech/TECH_STACK.md` / `docs/product/PRD.md`（依赖与交互细节同步）
+- 注意事项：
+  - **验证方式**：`pnpm build` 零报错；`cargo test` **120 passed / 0 failed / 0 warning**；
+    干跑 **0 项未通过**（含真实目录 2949 项零改动）；新增文本断言全部反向验证过
+  - **GUI 未做点击走查**（不擅自开窗口）：建议用户跑一次 `pnpm tauri dev` 目视确认，
+    可并入 TASK-15
+  - **`csp: null` 仍是纵深防御缺口**，建议独立小任务收紧
+  - 发现用户 `~/.claude/CLAUDE.md` 第 39 行手写了一行带中文逗号的
+    `@~/.ai-profile/AGENTS.md，`（在标记块外）——与标记块内的引用重复，
+    建议用户自行清理；CrossBrain 不代改用户标记块外的内容
 
 ---
 

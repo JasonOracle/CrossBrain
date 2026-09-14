@@ -2,19 +2,20 @@
 /**
  * MainView.vue — 主工作台外壳。
  *
- * ⚠️ 本轮（TASK-10）只交付**外壳**：顶部同步状态栏 + 三个功能区的入口占位。
- * 各功能区的具体内容由后续任务填充：
+ * 顶部同步状态栏与「立即同步」来自 TASK-10（当时只交付外壳 + 占位）。
+ * 三个功能区的归属：
  *
- * | 区域 | 归属任务 |
- * |:---|:---|
- * | 全局规则编辑器 | TASK-11 |
- * | 技能知识卡片列表 | TASK-12 |
- * | 设置 / 一键卸载 | TASK-14 |
+ * | 区域 | 归属任务 | 现状 |
+ * |:---|:---|:---|
+ * | 全局规则编辑器 | TASK-11 | ✅ 已实现（`RuleEditor.vue`） |
+ * | 技能知识卡片列表 | TASK-12 | 占位中 |
+ * | 设置 / 一键卸载 | TASK-14 | 占位中（备份与还原区已由 TASK-19 落地） |
  *
  * 之所以先做状态栏与「立即同步」，是因为向导结束后用户必须**看到同步结果**
  * 并且能再次触发同步——否则向导最后一步会把用户送进一个什么都不显示的空页面。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useMessage } from "naive-ui";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import IconCheck from "~icons/lucide/check";
@@ -35,7 +36,9 @@ import {
   type ToolSyncResult,
 } from "../api";
 import LinkNoticeDialog from "../components/LinkNoticeDialog.vue";
+import RuleEditor from "../components/RuleEditor.vue";
 import { useLinkNotice } from "../composables/useLinkNotice";
+import { useRuleEditor } from "../composables/useRuleEditor";
 
 const props = defineProps<{ startup: StartupState | null }>();
 
@@ -59,6 +62,19 @@ let unlisten: UnlistenFn | null = null;
  */
 const linkNotice = useLinkNotice(props.startup?.linkNoticeShown ?? false);
 const { open: linkNoticeOpen } = linkNotice;
+
+/** ── 「全局规则」页（TASK-11）── */
+const message = useMessage();
+const ruleEditor = useRuleEditor();
+
+/** 保存成功：轻提示，不用弹窗（验收项明确要求 Toast） */
+function onRulesSaved() {
+  message.success("已保存到本机，要点右上角「立即同步」才会推送到各工具。");
+}
+
+function onRulesSaveFailed(reason: string) {
+  message.error(reason);
+}
 
 /** ── 「设置 → 备份与还原」区（TASK-19） ── */
 const backups = ref<BackupInfo[]>([]);
@@ -281,20 +297,27 @@ function currentLocalTime(): string {
 
     <!-- ── 主体 ── -->
     <main class="mx-auto w-full max-w-5xl flex-1 px-8 py-6">
+      <!--
+        display-directive 用 show:lazy 而不是默认的 if：
+        默认值会在切走 Tab 时**卸载**面板，「全局规则」里没保存的修改会跟着丢。
+        show:lazy = 首次进入才渲染、之后常驻（只是隐藏），未保存内容得以保留。
+      -->
       <n-tabs v-model:value="activeTab" type="line" animated>
-        <n-tab-pane name="rules" tab="全局规则">
-          <div class="rounded-xl border border-dashed border-neutral-200 bg-white p-8 text-sm text-neutral-500">
-            规则编辑器正在开发中。目前你的规则已经保存在本机，可以通过右上角「立即同步」推送。
-          </div>
+        <n-tab-pane name="rules" tab="全局规则" display-directive="show:lazy">
+          <RuleEditor
+            :editor="ruleEditor"
+            @saved="onRulesSaved"
+            @save-failed="onRulesSaveFailed"
+          />
         </n-tab-pane>
 
-        <n-tab-pane name="knowledge" tab="技能知识">
+        <n-tab-pane name="knowledge" tab="技能知识" display-directive="show:lazy">
           <div class="rounded-xl border border-dashed border-neutral-200 bg-white p-8 text-sm text-neutral-500">
             技能知识管理正在开发中。
           </div>
         </n-tab-pane>
 
-        <n-tab-pane name="settings" tab="设置">
+        <n-tab-pane name="settings" tab="设置" display-directive="show:lazy">
           <!-- ── 备份与还原（TASK-19 / ADR-15：「可逆」） ── -->
           <section class="flex flex-col gap-4">
             <div>
