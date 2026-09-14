@@ -72,7 +72,11 @@
 
   `type` 取 `feat` / `fix` / `docs` / `chore` / `refactor` / `test`
 - 提交前先跑一遍「真实数据安全回归」（清单见 `.workbuddy/memory/MEMORY.md`），**确认用户真实目录零改动再提交**
-- `.gitignore` / `.gitattributes` 已就绪；新增构建产物目录时同步补规则，别让 9 GB 的 `target/` 溜进去
+- **顺序：先写文档与记忆 → 再提交**。`.workbuddy/` 已纳入版本控制，记忆更新应并入该 task 的同一个提交，
+  不要留成脏工作区、也不要单独提一次
+- 提交前自检：`git diff --cached --name-only | wc -l` 正常在 **90 上下**（当前基线）；
+  数量暴涨到几千说明忽略规则失效，9 GB 的 `target/` 溜进去了
+- `.gitignore` / `.gitattributes` 已就绪；新增构建产物目录时同步补规则
 
 ---
 

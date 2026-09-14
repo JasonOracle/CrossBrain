@@ -12,6 +12,14 @@
 ③ `CURRENT_STATUS.md` 三处同步（阶段表 / 任务状态 / 变更记录，时间戳用 `date` 取，**别自己算**）。
 验收条目含糊就**改写为可自动化形式**并标出验证方式。
 
+**版本控制**（2026-09-15 起）：远端 `git@github.com:JasonOracle/CrossBrain.git`，主分支 `main`。
+**一个 task 一个提交**，格式 `<type>: TASK-XX <一句话>` + 正文 + 末行 `验证：…`。
+提交前先跑「真实数据安全回归」，确认用户真实目录零改动。换行符统一 LF（`.gitattributes`
+`* text=auto eol=lf`）；仓库内**没有** `.bat/.cmd/.ps1`，新增这类脚本要单独豁免 CRLF。
+**提交前自检**：`git diff --cached --name-only | wc -l` 正常在 90 上下，
+变成几千就是 `src-tauri/target/`（9.2 GB）漏进去了。`.workbuddy/` 已纳入版本控制。
+详见 `AGENTS.md` 的「🔀 版本控制」章节。
+
 ## Rust 侧结构
 
 - 入口是 **`src-tauri/src/lib.rs`**（不是 `main.rs`）；新模块必须在 `lib.rs` 挂 `mod`，
