@@ -1710,6 +1710,20 @@ pub fn is_git_available() -> bool {
    在向导里是「帮你起步」，在主工作台是**静默覆盖用户已保存的规则**（数据丢失）。
    用「空白才显示」从机制上消灭误触，而不是靠确认弹窗兜底。
 
+5. **【用户反馈 BUG 修复，2026-09-15 11:35】`n-spin` 打断 flex 高度链，分栏高度失控**。
+   症状（用户截图实测）：初始态看不到输入框下方边框，footnote 被溢出的面板盖住
+   （只有中间缝隙露出「推送」两字）；多行输入后面板整体被顶出视口、顶部内容被盖、
+   textarea 无法内部滚动（「滚动不上去」）。
+   根因：`<n-spin class="flex-1 min-h-0">` 的 class 落在 `.n-spin-container` 上，
+   但插槽外层 `.n-spin-content` 高度默认 `auto`——内部 `h-full` 的 grid
+   全部解析失败，两窗格高度变成**随内容撑开**，flex 分配的高度形同虚设。
+   修复：`:content-style="{ height: '100%' }"`（一行）。
+   教训：**Naive UI 的包裹型组件（n-spin / n-card 等）会把 flex/grid 的高度链
+   切断在自己的 DOM 层里**——给它们内部传 `h-full` 时必须显式把高度接下去
+   （`content-style` / `content-class`）。修复后 CDP 实测：框高固定 364px、
+   footnote 完整可见、40 行内容 textarea 内部滚动正常（scrollTop 可设置）、
+   文档零溢出。
+
 5. **Naive UI Tab 默认会卸载面板**。`n-tab-pane` 默认 `display-directive="if"`，
    切走 Tab 即卸载——「全局规则」里没保存的修改会**跟着丢**。
    三个面板全部改为 `display-directive="show:lazy"`（首次进入才渲染、之后常驻）。

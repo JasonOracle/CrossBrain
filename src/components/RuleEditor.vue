@@ -150,7 +150,12 @@ function onKeydown(event: KeyboardEvent): void {
       </div>
     </n-alert>
 
-    <n-spin v-else class="min-h-0 flex-1" :show="editor.loading">
+    <n-spin
+      v-else
+      class="min-h-0 flex-1"
+      :show="editor.loading"
+      :content-style="{ height: '100%' }"
+    >
       <!-- ── 超长警告条（PRD §6.2，技能知识专用）── -->
       <n-alert v-if="overLimit" type="warning" class="mb-3" :bordered="false">
         此技能知识偏长，建议按主题拆分为多篇，有助于 AI 精准加载

@@ -331,6 +331,21 @@
 
 ---
 
+### 2026-09-15 11:33:08 — WorkBuddy（GLM-5.3-Flash）
+
+- 完成：**用户反馈布局 BUG 修复（RuleEditor 分栏）**。症状：初始态输入框下方
+  边框不可见、footnote 被盖（两框缝隙露出「推送」两字）；多行输入后面板顶出
+  视口、顶部内容被盖、textarea 无法内部滚动。根因：`n-spin` 的插槽层
+  `.n-spin-content` 高度默认 auto，切断了 flex 高度链——内部 `h-full` 全部失效，
+  窗格高度变成随内容撑开。修复：`:content-style="{ height: '100%' }"`（一行）。
+- 修改文件：`src/components/RuleEditor.vue`（+5 行）、
+  `docs/impl/TASK_BREAKDOWN.md`（TASK-11 实施修正追加第 5 条）、本文件、记忆库。
+- 验证：CDP 实测初始态四边边框完整、footnote 可见；40 行内容 textarea 内部
+  滚动正常（scrollTop 可设）、框高固定 364px、文档零溢出；测试内容已回填原文；
+  pnpm build 通过；`tauri.conf.json` 调试参数已还原。
+- 教训（已入 TASK_BREAKDOWN）：**Naive UI 包裹型组件会把 flex/grid 高度链
+  切断在自己的 DOM 层**——内部传 `h-full` 必须用 `content-style` 显式接续。
+
 ### 2026-09-15 11:24:32 — WorkBuddy（GLM-5.3-Flash）
 
 - 完成：**TASK-16 离线测试**。方法：CDP `Network.emulateNetworkConditions(offline:true)`
