@@ -59,6 +59,25 @@ CrossBrain 是一个 **100% 本地运行**的桌面应用，核心思路一句�
 
 ---
 
+## ✍️ 写在后面：作者自述
+
+**这是一个人的项目，也是一次人机结对的实践。**
+
+做它的动机很简单：我自己的电脑上同时跑着 4 个 AI 编程工具，每一份「我的编码偏好」都要抄 4 遍，改一条规则要手动改 4 个文件，还经常漏。有一天我发现其中一个工具的记忆还停留在两周前的版本，才意识到这不是效率问题，是正确性问题——于是有了这个项目。它不是为「做开源项目」而立项的，是先有痛点，再有 PRD，再有代码。
+
+整个项目由我和 AI 结对完成：我负责提需求、拍板架构决策、验收每一条红线；AI 负责写实现、跑测试、把我的口头决策沉淀成 15 篇架构决策记录（ADR）。从第一行代码到 v1.0.0 发布，用了两天。我认为「如何把 AI 用好」本身就是 2026 年程序员的核心能力，这个仓库的开发过程（git 历史里的每一轮提交、验收、返工）就是一份诚实的样本。
+
+几个印象最深的坑，都变成了代码里的红线：
+
+1. **最贵的教训：「读不到 ≠ 是空的」。** 同步引擎在源文件读取失败时，如果「好心」降级成空内容继续跑，孤儿清理逻辑会把用户在所有工具里的技能**全部删光**。这类错误测试还测不出来——除非你专门写「复制真实用户目录、跑真代码、断言零改动」的回归。现在 SSOT 读取失败即整体中止，这条红线写进了测试，不再靠自觉。
+2. **用户的目录比你想象的复杂。** 我发现有的用户会把配置文件做成**硬链接**（一份内容、多个名字）。同步时「正常」写入会把链接打断，用户的记忆中心从此更新不同步。现在的方案：首次改动前自动备份、弹窗明确告知「这个文件会断链」、提供一键还原。
+3. **所有测试全绿，应用照样是坏的。** 有一天单元测试、类型检查、干跑全过，真机走查却发现主界面永远空白——因为一处视图组件忘了接数据加载。从那以后，每个版本发布前都用 Playwright 驱动真实窗口逐页截图走查，自动化测试证明「逻辑对」，真机走查证明「人能用」。
+4. **文档说不清的，去二进制里挖。** OpenCode 官方文档没写清全局规则和技能的加载路径，我用 `grep` 直接在 180 MB 的可执行文件里挖出了运行时的路径拼接代码，再写探针实证——不猜，是接入新工具的唯一捷径，也是这条捷径让接入成本降到了半天以内。
+
+如果这个项目恰好也解决了你的问题，欢迎直接用；如果你想挑刺或者交流架构，更欢迎开 issue。
+
+---
+
 ## 📸 功能截图 / Screenshots
 
 ### 全局规则编辑器：左侧 Markdown，右侧实时预览
@@ -219,6 +238,24 @@ Grab the latest build from the [**Releases page**](https://github.com/JasonOracl
 ## Testing & quality
 
 167 Rust tests (unit + integration + IPC contract + four-adapter cross-consistency), all passing; dry-run regressions that copy the real user directory and assert zero modifications; Playwright-over-CDP walkthroughs against the real window; offline tests; ADR-driven development (15+ decision records).
+
+## ✍️ A note from the author
+
+**This is a one-person project — and an exercise in human–AI pairing.**
+
+The motivation was purely selfish: I run 4+ AI coding tools on one machine, and every copy of "my coding preferences" had to be maintained four times. One day I noticed one tool's memory was two weeks stale — that's not an efficiency problem, that's a correctness problem. So this project didn't start as "let's build an open-source project"; it started with a pain, then a PRD, then code.
+
+The whole thing was built by me pairing with an AI agent: I owned requirements, architecture decisions, and verifying every red line; the AI wrote the implementation, ran the tests, and distilled my decisions into 15+ architecture decision records. From first commit to the v1.0.0 release: two days. In 2026, knowing how to work with AI *is* a core engineering skill — this repository's git history, with every round of commit, review, and rework, is an honest sample of what that looks like.
+
+The pits that stuck with me, all of which became hard rules in code:
+
+1. **The most expensive lesson: "unreadable" ≠ "empty".** If the sync engine "helpfully" degrades to empty content on a read failure, the orphan cleanup will wipe *all* of the user's skills across every tool — and unit tests won't catch it unless you write regressions that copy a real user directory, run the real code, and assert zero changes. Today a failed SSOT read aborts the whole sync, and that rule is pinned by tests, not by good intentions.
+2. **User directories are messier than you think.** Some people hardlink their config files (one content, many names). A "normal" file write silently breaks the link and their memory center stops updating. The fix now: automatic backup before first modification, an explicit dialog disclosing the link breakage, and one-click restore.
+3. **Every test green, app still broken.** Unit tests, type checks, and dry runs all passed while the main view was permanently blank — one component simply never called its data loader. Since then, every release gets a real-window walkthrough: Playwright drives the actual app and screenshots every page. Automated tests prove the logic is right; the walkthrough proves a human can use it.
+4. **When docs are vague, read the binary.** OpenCode's docs never spelled out where global rules and skills load from, so I grepped the 180 MB executable for runtime path-joining code, then verified with a probe. Not guessing is the only shortcut — and it's what gets new-tool integration down to half a day.
+
+If this project solves your problem too, use it freely; if you want to poke holes or talk architecture, issues are very welcome.
+
 
 ## Roadmap
 
