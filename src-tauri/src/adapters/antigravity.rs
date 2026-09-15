@@ -144,6 +144,10 @@ impl Adapter for AntigravityAdapter {
         cleanup_crossbrain_orphans(&self.skills_dir(), active_slugs)
     }
 
+    fn skills_root(&self) -> PathBuf {
+        self.skills_dir()
+    }
+
     fn uninstall(&self) -> Result<Vec<String>, AdapterError> {
         let mut actions = Vec::new();
 

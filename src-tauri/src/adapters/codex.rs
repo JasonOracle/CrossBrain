@@ -304,6 +304,10 @@ impl Adapter for CodexAdapter {
         cleanup_crossbrain_orphans(&self.skills_dir(), active_slugs)
     }
 
+    fn skills_root(&self) -> PathBuf {
+        self.skills_dir()
+    }
+
     fn l0_backup(&self) -> Option<L0Backup> {
         // Codex 同样是**标记块注入型**：我们改的是用户的 `~/.codex/AGENTS.md` 本身，
         // 首次注入前留了 `.crossbrain-backup`（TASK-19 / ADR-15）。

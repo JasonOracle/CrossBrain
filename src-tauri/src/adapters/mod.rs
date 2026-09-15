@@ -181,6 +181,19 @@ pub trait Adapter: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// 本工具技能目录的根路径（探针功能的写入/移除依据）。
+    ///
+    /// 与 [`Adapter::sync_l2`] 实际写入的技能目录**必须同根**——
+    /// 探针往 `<skills_root>/crossbrain-probe/` 落一个临时技能，
+    /// 移除时也从这里删。两处若各写一份路径，日后分叉就是「探针删不掉」。
+    ///
+    /// # 为什么进 trait
+    ///
+    /// 探针的写入复用 [`Adapter::sync_l2`]（各 Adapter 自己知道写到哪），
+    /// 但**移除**不能复用 [`Adapter::cleanup_orphans`]——那是「删除所有不在
+    /// 白名单里的目录」，会把用户真实技能一并删掉。移除单个目录必须知道根路径。
+    fn skills_root(&self) -> PathBuf;
+
     /// 将 [`AdapterError`] 转为用户友好提示文字。
     ///
     /// 所有 UI 展示的错误文本**必须**经过此函数，不能直接展示系统错误字符串
@@ -242,6 +255,31 @@ pub fn ensure_crossbrain_slug(slug_hash: &str) -> Result<(), AdapterError> {
         )));
     }
     Ok(())
+}
+
+/// 删除技能目录下**指定的一个** CrossBrain 目录（探针清理专用）。
+///
+/// # 与 [`cleanup_crossbrain_orphans`] 的边界差异
+///
+/// 孤儿清理的语义是「删除所有不在白名单里的目录」，适合同步收尾；
+/// 探针移除要的是「只删这一个、其余都别动」——两者方向相反，不可互代。
+///
+/// # 红线（与孤儿清理同源）
+///
+/// `name` 必须落在 CrossBrain 命名空间内（过 [`ensure_crossbrain_slug`]）；
+/// 目录不存在时返回 `Ok(false)`——「本来就没有」不算错误（幂等）。
+pub fn remove_crossbrain_skill_dir(
+    skills_dir: &Path,
+    name: &str,
+) -> Result<bool, AdapterError> {
+    ensure_crossbrain_slug(name)?;
+    let dir = skills_dir.join(name);
+    if !dir.is_dir() {
+        return Ok(false);
+    }
+    fs::remove_dir_all(&dir)
+        .map_err(|e| AdapterError::WriteError(format!("{}：{e}", dir.display())))?;
+    Ok(true)
 }
 
 /// 在指定的 skills 目录里清理 CrossBrain 孤儿目录。
@@ -873,6 +911,10 @@ mod tests {
                 deleted_dirs: vec!["crossbrain-old-gone-000000".to_string()],
                 kept_dirs: active_slugs.to_vec(),
             })
+        }
+
+        fn skills_root(&self) -> PathBuf {
+            PathBuf::from("/nonexistent-crossbrain-skills")
         }
     }
 

@@ -19,22 +19,29 @@ import { useMessage } from "naive-ui";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import IconCheck from "~icons/lucide/check";
+import IconEraser from "~icons/lucide/eraser";
 import IconMinus from "~icons/lucide/minus";
+import IconRadar from "~icons/lucide/radar";
 import IconRefresh from "~icons/lucide/refresh-cw";
 import IconRotateCcw from "~icons/lucide/rotate-ccw";
 import IconTrash from "~icons/lucide/trash";
 import IconWifiOff from "~icons/lucide/wifi-off";
 
 import {
+  detectTools,
   listBackups,
   onSyncProgress,
+  removeToolProbe,
   restoreBackup,
   runSync,
+  runToolProbe,
   toUserMessage,
   uninstallCrossbrain,
   type BackupInfo,
+  type ProbeOutcome,
   type StartupState,
   type SyncReport,
+  type ToolInfo,
   type ToolSyncResult,
 } from "../api";
 import LinkNoticeDialog from "../components/LinkNoticeDialog.vue";
@@ -164,7 +171,10 @@ onMounted(() => {
 // 切到「设置」时重新读一次：用户可能刚在别处同步过，
 // 用挂载时那一份旧数据会让他以为没有备份可还原。
 watch(activeTab, (tab) => {
-  if (tab === "settings") void loadBackups();
+  if (tab === "settings") {
+    void loadBackups();
+    void loadProbeTools();
+  }
 });
 
 onUnmounted(() => {
@@ -280,6 +290,72 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// ============================================================================
+// 工具读取检测（探针）
+// ============================================================================
+
+/** 支持的工具清单（复用向导的检测结果，含安装状态） */
+const probeTools = ref<ToolInfo[]>([]);
+const probeToolsLoaded = ref(false);
+/** 各工具的探针结论，键为 toolId；无键 = 还没测过 */
+const probeResults = ref<Record<string, ProbeOutcome>>({});
+/** 正在检测的工具（同时承担按钮 loading 与全局防重复） */
+const probingToolId = ref("");
+/** 正在移除探针的工具 */
+const removingProbeToolId = ref("");
+
+async function loadProbeTools() {
+  try {
+    probeTools.value = await detectTools();
+  } catch {
+    // 清单读不出来不阻断检测区——留空即可，用户重进设置页会再试
+    probeTools.value = [];
+  } finally {
+    probeToolsLoaded.value = true;
+  }
+}
+
+async function startProbe(toolId: string) {
+  if (probingToolId.value) return;
+  probingToolId.value = toolId;
+  const next = { ...probeResults.value };
+  delete next[toolId];
+  probeResults.value = next;
+
+  try {
+    const outcome = await runToolProbe(toolId);
+    probeResults.value = { ...probeResults.value, [toolId]: outcome };
+  } catch (e) {
+    probeResults.value = {
+      ...probeResults.value,
+      [toolId]: {
+        toolId,
+        displayName: "",
+        status: "failed",
+        token: "",
+        message: toUserMessage(e),
+      },
+    };
+  } finally {
+    probingToolId.value = "";
+  }
+}
+
+async function clearProbe(toolId: string) {
+  if (removingProbeToolId.value) return;
+  removingProbeToolId.value = toolId;
+  try {
+    message.success(await removeToolProbe(toolId));
+    const next = { ...probeResults.value };
+    delete next[toolId];
+    probeResults.value = next;
+  } catch (e) {
+    message.error(toUserMessage(e));
+  } finally {
+    removingProbeToolId.value = "";
+  }
 }
 
 /**
@@ -481,6 +557,76 @@ function currentLocalTime(): string {
             <n-alert v-if="restoreError" type="error" :bordered="false">
               {{ restoreError }}
             </n-alert>
+          </section>
+
+          <!-- ── 工具读取检测（探针）：验证各工具真的读到了推送的内容 ── -->
+          <section class="mt-8 flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4">
+            <div>
+              <h2 class="text-base font-medium text-neutral-900">工具读取检测</h2>
+              <p class="mt-1 text-sm leading-6 text-neutral-500">
+                向各工具写入一条临时的「探针」技能，验证它们真的能读到 CrossBrain
+                推送的内容。Codex 会自动给出结论；其它工具需要你到工具里问一句确认。
+                探针看完即可移除，下次「立即同步」也会自动清理。
+              </p>
+            </div>
+
+            <div v-if="!probeToolsLoaded" class="text-sm text-neutral-500">
+              正在读取工具信息……
+            </div>
+
+            <div v-else class="flex flex-col gap-2">
+              <div
+                v-for="tool in probeTools"
+                :key="tool.toolId"
+                class="flex items-start justify-between gap-4 rounded-lg border border-neutral-100 bg-neutral-50 px-4 py-3"
+              >
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-medium text-neutral-900">
+                      {{ tool.displayName }}
+                    </span>
+                    <n-tag v-if="!tool.installed" size="small" :bordered="false">未安装</n-tag>
+                  </div>
+                  <p
+                    v-if="probeResults[tool.toolId]"
+                    class="mt-1 text-xs leading-5"
+                    :class="
+                      probeResults[tool.toolId].status === 'failed'
+                        ? 'text-error-500'
+                        : 'text-neutral-600'
+                    "
+                  >
+                    {{ probeResults[tool.toolId].message }}
+                  </p>
+                </div>
+
+                <div class="flex shrink-0 items-center gap-2">
+                  <n-button
+                    size="small"
+                    :loading="probingToolId === tool.toolId"
+                    :disabled="!tool.installed || probingToolId !== ''"
+                    @click="startProbe(tool.toolId)"
+                  >
+                    <template #icon>
+                      <IconRadar v-if="probingToolId !== tool.toolId" class="h-4 w-4" aria-hidden="true" />
+                    </template>
+                    检测
+                  </n-button>
+                  <n-button
+                    v-if="probeResults[tool.toolId] && probeResults[tool.toolId].status !== 'verified'"
+                    size="small"
+                    quaternary
+                    :loading="removingProbeToolId === tool.toolId"
+                    @click="clearProbe(tool.toolId)"
+                  >
+                    <template #icon>
+                      <IconEraser class="h-4 w-4" aria-hidden="true" />
+                    </template>
+                    移除探针
+                  </n-button>
+                </div>
+              </div>
+            </div>
           </section>
 
           <!-- ── 卸载 / 去痕（TASK-14）：删除性操作，必须二次确认 ── -->

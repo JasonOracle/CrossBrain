@@ -9,10 +9,10 @@
 
 | 项目 | 状态 |
 |:---|:---|
-| **当前阶段** | 🔄 **第 4 阶段：系统验证与打包** — **TASK-15 ✅（端到端测试）**、**TASK-16 ✅（离线测试）**——进入 TASK-17（生产构建 + 打包） |
+| **当前阶段** | 🔄 **第 4 阶段：系统验证与打包** — **TASK-15 ✅（端到端测试）**、**TASK-16 ✅（离线测试）**、**TASK-20 ✅（增补：探针检测，工具读取验证）**——进入 TASK-17（生产构建 + 打包） |
 | **当前日期** | 2026-09-15 |
 | **计划交付** | 2026-09-28（两周） |
-| **下一个任务** | `TASK-17`：`pnpm tauri build` 生产构建（验收：无 error、MSI 生成、可安装、可启动）<br>✅ `TASK-16` **已于 2026-09-15 11:24 完成**：T7-1/T7-2 通过（CDP 离线模拟）；T7-3 与 T8-1/T8-3 依赖暂缓的 TASK-09，随其回补<br>✅ `TASK-15` 已于 2026-09-15 11:12 完成：T9-1/T9-2 真机端到端通过（含 Codex `debug prompt-input` 实证技能加载）+ 积压 GUI 走查；**发现并修复 MainView 未加载规则内容的 BUG**；T10 真机确认卸载留用户执行<br>✅ `TASK-14` 已于 2026-09-15 10:30 完成：三工具去痕 + 标记块外内容保留 + 状态文件删除回向导<br>✅ `TASK-13` 已于 2026-09-15 09:58 完成：离线指示红色化 + 失败原因可点击展开 + report.ok 权威判定；git commit 一项顺延 TASK-09<br>✅ `TASK-12` 已于 2026-09-15 09:48 完成：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原 |
+| **下一个任务** | `TASK-17`：✅ `TASK-20`（增补）**已于 2026-09-15 12:01 完成**：设置页「工具读取检测」——写临时探针技能 + Codex 全自动取证（`codex debug prompt-input`）+ 移除/同步/卸载三重清理；真机端到端通过<br>`pnpm tauri build` 生产构建（验收：无 error、MSI 生成、可安装、可启动）<br>✅ `TASK-16` **已于 2026-09-15 11:24 完成**：T7-1/T7-2 通过（CDP 离线模拟）；T7-3 与 T8-1/T8-3 依赖暂缓的 TASK-09，随其回补<br>✅ `TASK-15` 已于 2026-09-15 11:12 完成：T9-1/T9-2 真机端到端通过（含 Codex `debug prompt-input` 实证技能加载）+ 积压 GUI 走查；**发现并修复 MainView 未加载规则内容的 BUG**；T10 真机确认卸载留用户执行<br>✅ `TASK-14` 已于 2026-09-15 10:30 完成：三工具去痕 + 标记块外内容保留 + 状态文件删除回向导<br>✅ `TASK-13` 已于 2026-09-15 09:58 完成：离线指示红色化 + 失败原因可点击展开 + report.ok 权威判定；git commit 一项顺延 TASK-09<br>✅ `TASK-12` 已于 2026-09-15 09:48 完成：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原 |
 | **环境状态** | ✅ Rust 1.98.1 (MSVC) + VS Build Tools 2022；`~/.ai-profile/` SSOT 底座就绪；**IPC 层已打通，首次运行向导已端到端验证**；**支持工具数 2 → 3**（Claude Code / Antigravity IDE / Codex） |
 
 ---
@@ -330,6 +330,24 @@
 > ```
 
 ---
+
+### 2026-09-15 12:01:14 — WorkBuddy（GLM-5.3-Flash）
+
+- 完成：**TASK-20 探针检测（增补任务）**。设置页新增「工具读取检测」区：
+  向各工具技能目录写 `crossbrain-probe/` 临时技能（frontmatter description 含
+  唯一标记 `cb-probe-<时间戳>`）；**Codex 全自动取证**（运行 `codex debug
+  prompt-input`、30 秒超时、输出落临时文件判标记，通过即当场清理探针）；
+  Claude Code / Antigravity 半自动（返回人工验证问句与标记）。移除有三重兜底：
+  手动按钮、下次同步的孤儿清理、卸载。
+- 关键改动：`Adapter` trait 新增必选方法 `skills_root()`（写与删同根）；
+  共享函数 `remove_crossbrain_skill_dir()`（只删一个，不可用 cleanup_orphans
+  反向表达）；`commands.rs` 两条新命令（`run_tool_probe` 走 spawn_blocking）；
+  设置页复用 `detectTools` 出清单。
+- 验证：cargo test **141 passed / 0 failed**（+4 探针单测、+1 契约测试
+  `probe_wiring_matches`）；pnpm build 通过；**真机端到端**——手工写入探针后
+  `codex debug prompt-input` 输出中出现标记，清理后零残留。
+- 文件：`adapters/mod.rs`、三个 Adapter、`sync.rs`、`commands.rs`、`lib.rs`、
+  `api.ts`、`MainView.vue`、`ipc_contract.rs`、TASK_BREAKDOWN（TASK-20 节）、本文件。
 
 ### 2026-09-15 11:33:08 — WorkBuddy（GLM-5.3-Flash）
 

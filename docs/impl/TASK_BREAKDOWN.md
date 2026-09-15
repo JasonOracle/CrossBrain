@@ -2870,3 +2870,64 @@ cd .. && pnpm build         # vue-tsc --noEmit + vite build 零报错
    Windows 上 Rust std 拿不到 links，且断链不是 Claude 独有。若日后要做精确检测，
    需引入 `windows` crate 或 shell 调 `fsutil hardlink list`。
 
+
+---
+
+## TASK-20：探针检测——验证工具真的读到了 CrossBrain 的内容（2026-09-15 增补）
+
+> **增补任务。** 触发：用户看到应用只支持 Claude Code / Codex（实际是三个，
+> Antigravity 在列表中），追问其它工具何时接入。讨论中确认：项目铁律
+> 「接入必先 Spike 探针验证」目前只存在于开发流程里，用户自己无法验证
+> 「装了这个工具，CrossBrain 推的内容真的被读到了」。把它产品化进设置页。
+
+### 功能定义
+
+设置页新增「工具读取检测」区，逐工具提供「检测」按钮：
+
+1. **写入探针**：走 `Adapter::sync_l2` 往该工具技能目录写 `crossbrain-probe/`
+   （SKILL.md 的 frontmatter description 与正文均含唯一标记 `cb-probe-<时间戳>`）。
+2. **验证**：
+   - **Codex 全自动**：运行 `codex debug prompt-input`（中立目录、30 秒超时、
+     stdout/stderr 落临时文件后判 grep）——标记出现 = `Verified`，当场删探针；
+     标记没出现 = `Failed`（保留探针供人工排查）；启动失败/超时 = `NeedsManual`。
+   - **Claude Code / Antigravity 半自动**：无取证命令，返回 `NeedsManual`，
+     文案给出人工验证问句（「列出你可用的技能」）与标记，等用户确认。
+3. **移除**：「移除探针」按钮 + 两道既有兜底——下次同步的孤儿清理与卸载
+   都会删 `crossbrain-probe`（`crossbrain-` 前缀天然在命名空间内）。
+
+### ⚠️ 实施修正（2026-09-15）
+
+1. **「移除探针」绝不能复用 `cleanup_orphans`**。原任务草案想「清空后重写」——
+   错误方向：`cleanup_orphans(白名单)` 的语义是「删掉所有不在白名单里的目录」，
+   要删的恰恰是白名单里的那一个。新增共享函数
+   `remove_crossbrain_skill_dir(skills_dir, name)`（只删一个、过命名空间校验、
+   不存在返回 `Ok(false)` 幂等）。
+2. **为此给 `Adapter` trait 加了必选方法 `skills_root()`**（三个真实 Adapter +
+   4 个测试 Mock 全部实现）。它必须与 `sync_l2` 实际写入的技能目录同根——
+   写与删各写一份路径，日后分叉就是「探针删不掉」。没有给默认实现：
+   返回假路径的默认值是「静默装作有」，与 trait 上其它默认方法（语义上的
+   真实空操作）性质不同。
+3. **Codex 取证的 stdout 必须落文件而非管道**。管道写满会让子进程卡死，
+   超时强杀后管道里的数据也拿不全；临时文件随写随有，强杀后仍可用已产出的
+   部分判定。stderr 一并收集——若提示实际写在 stderr，stdout-only 会假阴性。
+4. **探针的 token 必须进 frontmatter 的 `description`**，只写正文不够——
+   模型可见输入里出现的是技能清单行（`- name: description`），正文是懒加载的。
+5. **探针写入失败不产生半状态**：`sync_l2` 失败直接返回 `Failed`，
+   不触碰其它文件；`detect=false` 时直接 `Failed` 且不创建任何目录。
+
+### ✅ 实施记录（2026-09-15）
+
+- 后端：`adapters/mod.rs`（trait 方法 + `remove_crossbrain_skill_dir`）、
+  三个 Adapter 的 `skills_root()`、`sync.rs` 探针模块（`run_tool_probe(_for)` /
+  `remove_tool_probe(_for)` / `verify_codex_probe`）、`commands.rs` 两条命令
+  （`run_tool_probe` 走 `spawn_blocking`，真实启动 Codex 最长 30 秒）、`lib.rs` 注册。
+- 前端：`api.ts`（`ProbeOutcome` + 两个封装）、`MainView.vue` 设置页新区块
+  （复用 `detectTools` 出清单，未安装禁用；结果文案按状态着色）。
+- 测试：cargo test **141 passed / 0 failed**（新增 4 个探针单测：写入+人工态+移除幂等、
+  移除不波及真实技能、未知/未安装失败语义、未安装时移除幂等；新增契约测试
+  `probe_wiring_matches` 锁命令名完整形态与 lib.rs 注册）。`pnpm build` 通过。
+- **真机端到端**：手工按同一形态写入 `~/.codex/skills/crossbrain-probe/`
+  → `codex debug prompt-input` 输出中出现标记 → 删除探针目录，`AGENTS.md`
+  与其它技能零改动。
+- 边界说明：Codex 的自动取证依赖其命令行在系统 PATH 中；打包版（TASK-17）
+  若 PATH 不含 codex，会走 `NeedsManual` 分支并给出人工指引，不算失败。

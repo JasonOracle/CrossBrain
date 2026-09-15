@@ -197,6 +197,34 @@ pub async fn uninstall_crossbrain() -> Result<Vec<sync::UninstallOutcome>, Strin
 }
 
 // ============================================================================
+// 探针检测（增补任务：验证工具真的读到了 CrossBrain 的内容）
+// ============================================================================
+
+/// 对一个工具执行探针检测：写入临时探针技能，能自动取证的直接给结论。
+///
+/// Codex 侧会真实启动它的调试命令（最长约 30 秒），因此与 [`run_sync`]
+/// 同理必须 `async` + `spawn_blocking`，不能占住主线程。
+#[tauri::command]
+pub async fn run_tool_probe(tool_id: String) -> sync::ProbeOutcome {
+    let joined = tauri::async_runtime::spawn_blocking(move || sync::run_tool_probe(&tool_id))
+        .await
+        .unwrap_or_else(|_| sync::ProbeOutcome {
+            tool_id: String::new(),
+            display_name: String::new(),
+            status: sync::ProbeStatus::Failed,
+            token: String::new(),
+            message: "检测过程意外中断，请重试。".to_string(),
+        });
+    joined
+}
+
+/// 移除一个工具的探针（幂等：本来没有就说明无需清理）。
+#[tauri::command]
+pub fn remove_tool_probe(tool_id: String) -> Result<String, String> {
+    sync::remove_tool_probe(&tool_id)
+}
+
+// ============================================================================
 // 技能知识库 CRUD（TASK-12）
 // ============================================================================
 

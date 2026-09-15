@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::adapters::{format_skill_md, Adapter, AdapterError};
+use crate::adapters::{format_skill_md, remove_crossbrain_skill_dir, Adapter, AdapterError};
 use crate::adapters::antigravity::AntigravityAdapter;
 use crate::adapters::claude_code::ClaudeCodeAdapter;
 use crate::adapters::codex::CodexAdapter;
@@ -475,6 +475,245 @@ pub fn uninstall_all_for(tools: &mut [ToolDescriptor]) -> Result<Vec<UninstallOu
 fn format_local_time(time: std::time::SystemTime) -> String {
     let dt: chrono::DateTime<chrono::Local> = time.into();
     dt.format("%Y-%m-%d %H:%M").to_string()
+}
+
+// ============================================================================
+// 探针检测（增补任务：验证工具真的读到了 CrossBrain 的内容）
+// ============================================================================
+
+/// 探针技能的固定目录名。
+///
+/// 走 [`Adapter::sync_l2`] 写入（过命名空间校验、落在各工具自己的技能目录），
+/// 因此天然被三道既有机制覆盖：下次同步的孤儿清理会删它、卸载会删它、
+/// 用户手动「移除探针」也能删它——探针永远不会变成滞留垃圾。
+pub const PROBE_SLUG: &str = "crossbrain-probe";
+
+/// 探针结果状态。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProbeStatus {
+    /// 自动验证通过——工具读取的内容里确实出现了探针标记
+    Verified,
+    /// 探针已写入，但该工具没有可自动取证的命令，需要用户人工确认
+    NeedsManual,
+    /// 写入失败，或自动取证明确判定「没读到」
+    Failed,
+}
+
+/// 单个工具的探针结果（设置页「工具读取检测」区展示）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeOutcome {
+    pub tool_id: String,
+    pub display_name: String,
+    pub status: ProbeStatus,
+    /// 本次探针的唯一标记（`cb-probe-<时间戳>`），人工验证时用它对答案
+    pub token: String,
+    /// 面向用户的说明（不含系统错误码与技术路径）
+    pub message: String,
+}
+
+/// 对一个工具执行探针检测（生产入口）。
+pub fn run_tool_probe(tool_id: &str) -> ProbeOutcome {
+    run_tool_probe_for(&build_tools(), tool_id)
+}
+
+/// [`run_tool_probe`] 的可注入变体：由调用方提供工具清单（测试用临时目录）。
+///
+/// 流程：写入探针技能 → （能自动取证的）运行工具自带命令验证 →
+/// 产出结论。探针写入失败绝不波及其它文件——`sync_l2` 只碰
+/// `crossbrain-` 命名空间内的一个新目录。
+pub fn run_tool_probe_for(tools: &[ToolDescriptor], tool_id: &str) -> ProbeOutcome {
+    let outcome = |display_name: &str, status: ProbeStatus, token: &str, message: String| {
+        ProbeOutcome {
+            tool_id: tool_id.to_string(),
+            display_name: display_name.to_string(),
+            status,
+            token: token.to_string(),
+            message,
+        }
+    };
+
+    let Some(tool) = tools.iter().find(|t| t.tool_id == tool_id) else {
+        return outcome(tool_id, ProbeStatus::Failed, "", "未知工具".to_string());
+    };
+
+    match tool.adapter.detect() {
+        Ok(false) => {
+            return outcome(
+                tool.display_name,
+                ProbeStatus::Failed,
+                "",
+                "未检测到此工具，无法检测。".to_string(),
+            )
+        }
+        Err(e) => {
+            return outcome(
+                tool.display_name,
+                ProbeStatus::Failed,
+                "",
+                user_facing_error(&*tool.adapter, &e),
+            )
+        }
+        Ok(true) => {}
+    }
+
+    let token = format!("cb-probe-{}", chrono::Utc::now().timestamp());
+    let body = format!(
+        "# 连通性探针 {token}\n\nCrossBrain 写入的临时检测技能，\
+用于确认本工具能否读到共享内容。验证完成后即可删除。"
+    );
+    let content = format_skill_md(PROBE_SLUG, &body);
+
+    if let Err(e) = tool.adapter.sync_l2(PROBE_SLUG, &content) {
+        return outcome(
+            tool.display_name,
+            ProbeStatus::Failed,
+            "",
+            user_facing_error(&*tool.adapter, &e),
+        );
+    }
+
+    // Codex 有官方取证命令（TASK-18 Spike 实证）：把「发给模型的完整输入」
+    // 打出来，探针标记在不在里面一目了然。其它工具没有等价命令，转人工。
+    if tool.tool_id == "codex" {
+        return match verify_codex_probe(&token) {
+            Ok(true) => {
+                // 结论已拿到，探针当场清理；清不掉也无妨（下次同步/卸载兜底）
+                let _ = remove_crossbrain_skill_dir(&tool.adapter.skills_root(), PROBE_SLUG);
+                outcome(
+                    tool.display_name,
+                    ProbeStatus::Verified,
+                    &token,
+                    format!(
+                        "检测通过：{0} 能看到 CrossBrain 写入的内容（标记 {token}）。探针已自动清理。",
+                        tool.display_name
+                    ),
+                )
+            }
+            Ok(false) => outcome(
+                tool.display_name,
+                ProbeStatus::Failed,
+                &token,
+                format!(
+                    "{0} 已运行，但没有在它读取的内容里发现探针标记（{token}）。\
+请人工确认后点「移除探针」清理。",
+                    tool.display_name
+                ),
+            ),
+            Err(reason) => outcome(
+                tool.display_name,
+                ProbeStatus::NeedsManual,
+                &token,
+                format!(
+                    "{reason}。探针已写入，请打开 {0} 问一句\
+「列出你可用的技能」，看到 crossbrain-probe（标记 {token}）即读取正常；\
+看完点「移除探针」清理。",
+                    tool.display_name
+                ),
+            ),
+        };
+    }
+
+    outcome(
+        tool.display_name,
+        ProbeStatus::NeedsManual,
+        &token,
+        format!(
+            "探针已写入。请打开 {0} 问一句「列出你可用的技能」，\
+若列表里出现 crossbrain-probe（标记 {token}），说明读取正常。\
+看完点「移除探针」清理；下次「立即同步」也会自动清掉它。",
+            tool.display_name
+        ),
+    )
+}
+
+/// 移除一个工具的探针（生产入口）。
+pub fn remove_tool_probe(tool_id: &str) -> Result<String, String> {
+    remove_tool_probe_for(&build_tools(), tool_id)
+}
+
+/// [`remove_tool_probe`] 的可注入变体（测试用临时目录）。
+///
+/// 不要求工具已安装：目录不存在时返回「无需清理」——幂等。
+pub fn remove_tool_probe_for(tools: &[ToolDescriptor], tool_id: &str) -> Result<String, String> {
+    let tool = tools
+        .iter()
+        .find(|t| t.tool_id == tool_id)
+        .ok_or_else(|| "未知工具".to_string())?;
+
+    match remove_crossbrain_skill_dir(&tool.adapter.skills_root(), PROBE_SLUG) {
+        Ok(true) => Ok(format!("已移除 {} 的探针。", tool.display_name)),
+        Ok(false) => Ok("没有找到探针，无需清理。".to_string()),
+        Err(e) => Err(user_facing_error(&*tool.adapter, &e)),
+    }
+}
+
+/// 用 Codex 自带的调试命令验证探针是否进入模型可见输入。
+///
+/// `codex debug prompt-input` 把「发给模型的完整输入」打到 stdout——
+/// 这是**读取事实**的取证（Spike E 实证过），比人工对话更硬。
+/// 必须在**中立目录**运行（不能在用户项目里跑，避免额外上下文干扰）。
+///
+/// - `Ok(true)`：标记出现了，读取正常
+/// - `Ok(false)`：命令正常结束但标记没出现——判定「没读到」
+/// - `Err(原因)`：无法自动判定（启动失败 / 超时），转人工
+fn verify_codex_probe(token: &str) -> Result<bool, String> {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    // stdout/stderr 各落到临时文件而不是管道：管道写满会让子进程卡死，
+    // 而文件随写随有，超时强杀后仍然能拿已产出的部分来判定
+    let temp = std::env::temp_dir();
+    let out_file = temp.join(format!("{token}-stdout.txt"));
+    let err_file = temp.join(format!("{token}-stderr.txt"));
+
+    let spawn = Command::new("codex")
+        .args(["debug", "prompt-input", "请列出你可用的技能"])
+        .current_dir(&temp)
+        .stdout(std::fs::File::create(&out_file).map_err(|_| "无法创建检测临时文件".to_string())?)
+        .stderr(std::fs::File::create(&err_file).map_err(|_| "无法创建检测临时文件".to_string())?)
+        .spawn();
+
+    let mut child = match spawn {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err("无法启动 Codex 命令行（可能未安装或不在系统路径）".to_string())
+        }
+        Err(_) => return Err("无法启动 Codex 命令行".to_string()),
+    };
+
+    // 最长等 30 秒。debug 命令通常秒回，超时基本等于环境有问题
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let timed_out = loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break false,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break true;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            Err(_) => {
+                let _ = std::fs::remove_file(&out_file);
+                let _ = std::fs::remove_file(&err_file);
+                return Err("检测过程出现异常".to_string());
+            }
+        }
+    };
+
+    let stdout = std::fs::read_to_string(&out_file).unwrap_or_default();
+    let stderr = std::fs::read_to_string(&err_file).unwrap_or_default();
+    let _ = std::fs::remove_file(&out_file);
+    let _ = std::fs::remove_file(&err_file);
+
+    let found = stdout.contains(token) || stderr.contains(token);
+    if timed_out && !found {
+        return Err("Codex 检测超时".to_string());
+    }
+    Ok(found)
 }
 
 // ============================================================================
@@ -926,6 +1165,9 @@ mod tests {
             fn cleanup_orphans(&self, _: &[String]) -> Result<CleanupReport, AdapterError> {
                 unreachable!("未安装的工具不应被调用 cleanup_orphans")
             }
+            fn skills_root(&self) -> PathBuf {
+                PathBuf::from("/nonexistent-crossbrain-skills")
+            }
         }
 
         let tool = ToolDescriptor {
@@ -973,6 +1215,9 @@ mod tests {
                     kept_dirs: vec![],
                 })
             }
+            fn skills_root(&self) -> PathBuf {
+                PathBuf::from("/nonexistent-crossbrain-skills")
+            }
         }
 
         let tool = ToolDescriptor {
@@ -1012,6 +1257,9 @@ mod tests {
             }
             fn cleanup_orphans(&self, _: &[String]) -> Result<CleanupReport, AdapterError> {
                 unreachable!()
+            }
+            fn skills_root(&self) -> PathBuf {
+                PathBuf::from("/nonexistent-crossbrain-skills")
             }
         }
 
@@ -1182,5 +1430,141 @@ mod tests {
         let cards = list_knowledge_cards_for(&tmp.0).unwrap();
         assert_eq!(cards.len(), 1, "实际：{:?}", cards.iter().map(|c| &c.file_name).collect::<Vec<_>>());
         assert_eq!(cards[0].file_name, "a.md");
+    }
+
+    // ------------------------------------------------------------------------
+    // 探针检测（增补任务）——真实 Adapter + 临时目录
+    //
+    // ⚠️ Codex 的**自动取证**不在这里测：那会真的启动 `codex debug` 子进程，
+    // 慢且依赖本机环境。它的读取语义由 TASK-18 的 Spike 实证 + TASK-15 的
+    // 端到端走查覆盖；这里只测写入 / 移除 / 判定分支。
+    // ------------------------------------------------------------------------
+
+    /// 用注入临时目录的真实 Adapter 拼一份工具清单。
+    fn probe_tools_with_base(dir: &Path) -> Vec<ToolDescriptor> {
+        vec![
+            ToolDescriptor {
+                tool_id: "claude_code",
+                display_name: "Claude Code",
+                push_path: PathBuf::from("/nowhere"),
+                adapter: Box::new(ClaudeCodeAdapter::with_base_dir(dir)),
+            },
+            ToolDescriptor {
+                tool_id: "antigravity",
+                display_name: "Antigravity IDE",
+                push_path: PathBuf::from("/nowhere"),
+                adapter: Box::new(AntigravityAdapter::with_base_dir(dir)),
+            },
+            ToolDescriptor {
+                tool_id: "codex",
+                display_name: "Codex",
+                push_path: PathBuf::from("/nowhere"),
+                adapter: Box::new(CodexAdapter::with_base_dir(dir)),
+            },
+        ]
+    }
+
+    /// 探针必须真的落到 `<skills>/crossbrain-probe/SKILL.md`，且标记同时
+    /// 出现在文件正文与 frontmatter 的 description 里（后者才是模型可见的）。
+    #[test]
+    fn probe_writes_skill_and_reports_manual_for_injectable_tools() {
+        for tool_id in ["claude_code", "antigravity"] {
+            let tmp = TempKnowledgeDir::new();
+            let tools = probe_tools_with_base(&tmp.0);
+
+            let result = run_tool_probe_for(&tools, tool_id);
+            assert_eq!(result.status, ProbeStatus::NeedsManual, "工具：{tool_id}");
+            assert!(result.token.starts_with("cb-probe-"), "标记形态：{}", result.token);
+            assert!(
+                result.message.contains(&result.token) && result.message.contains("移除探针"),
+                "人工指引必须带标记与清理入口：{}",
+                result.message
+            );
+
+            let skill = tmp
+                .0
+                .join("skills")
+                .join(PROBE_SLUG)
+                .join("SKILL.md");
+            let text = fs::read_to_string(&skill)
+                .unwrap_or_else(|e| panic!("{tool_id} 探针未落盘：{e}"));
+            assert!(text.contains(&result.token), "正文缺标记：{text}");
+            assert!(
+                text.contains(&format!("description: 连通性探针 {}", result.token)),
+                "frontmatter 的 description 必须含标记（模型可见的是它）：{text}"
+            );
+
+            // 移除幂等：第一次删掉，第二次「无需清理」
+            let removed = remove_tool_probe_for(&tools, tool_id).unwrap();
+            assert!(removed.contains("已移除"), "实际：{removed}");
+            assert!(!skill.exists(), "移除后探针目录不应残留");
+            let again = remove_tool_probe_for(&tools, tool_id).unwrap();
+            assert!(again.contains("无需清理"), "实际：{again}");
+        }
+    }
+
+    /// 探针移除只删 `crossbrain-probe` 自己——同目录下的真实技能必须原样保留。
+    #[test]
+    fn probe_removal_spares_real_skills() {
+        let tmp = TempKnowledgeDir::new();
+        let skills = tmp.0.join("skills");
+        fs::create_dir_all(skills.join("crossbrain-vue3-abc123")).unwrap();
+        fs::write(
+            skills.join("crossbrain-vue3-abc123").join("SKILL.md"),
+            "# 真实技能",
+        )
+        .unwrap();
+        fs::create_dir_all(skills.join(PROBE_SLUG)).unwrap();
+
+        let tools = probe_tools_with_base(&tmp.0);
+        remove_tool_probe_for(&tools, "antigravity").unwrap();
+
+        assert!(
+            skills.join("crossbrain-vue3-abc123").join("SKILL.md").exists(),
+            "探针移除不得波及真实技能"
+        );
+    }
+
+    /// 未知工具与未安装工具都必须给出**用户可读**的失败结论，
+    /// 且不落任何文件。
+    #[test]
+    fn probe_fails_cleanly_for_unknown_or_missing_tools() {
+        let tmp = TempKnowledgeDir::new();
+        let tools = probe_tools_with_base(&tmp.0);
+
+        let unknown = run_tool_probe_for(&tools, "nope");
+        assert_eq!(unknown.status, ProbeStatus::Failed);
+        assert_eq!(unknown.message, "未知工具");
+
+        // base_dir 指向不存在的子路径 → detect=false
+        let missing = TempKnowledgeDir::new();
+        let absent_tools = vec![ToolDescriptor {
+            tool_id: "claude_code",
+            display_name: "Claude Code",
+            push_path: PathBuf::from("/nowhere"),
+            adapter: Box::new(ClaudeCodeAdapter::with_base_dir(missing.0.join("absent"))),
+        }];
+        let result = run_tool_probe_for(&absent_tools, "claude_code");
+        assert_eq!(result.status, ProbeStatus::Failed);
+        assert!(
+            result.message.contains("未检测到此工具"),
+            "实际文案：{}",
+            result.message
+        );
+        assert!(!missing.0.join("absent").exists(), "失败路径不得创建目录");
+    }
+
+    /// 移除命令对「工具未安装」也要幂等成功（探针清理不该依赖安装状态）。
+    #[test]
+    fn probe_removal_works_even_when_tool_missing() {
+        let tmp = TempKnowledgeDir::new();
+        let tools = vec![ToolDescriptor {
+            tool_id: "codex",
+            display_name: "Codex",
+            push_path: PathBuf::from("/nowhere"),
+            adapter: Box::new(CodexAdapter::with_base_dir(tmp.0.join("absent"))),
+        }];
+        let removed = remove_tool_probe_for(&tools, "codex").unwrap();
+        assert!(removed.contains("无需清理"), "实际：{removed}");
     }
 }

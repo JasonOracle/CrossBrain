@@ -227,6 +227,10 @@ impl Adapter for ClaudeCodeAdapter {
         cleanup_crossbrain_orphans(&self.skills_dir(), active_slugs)
     }
 
+    fn skills_root(&self) -> PathBuf {
+        self.skills_dir()
+    }
+
     fn l0_backup(&self) -> Option<L0Backup> {
         // Claude Code 是**标记块注入型**：我们改的是用户的 `CLAUDE.md` 本身，
         // 首次注入前留了 `.crossbrain-backup`。因此「还原」在这里有明确含义

@@ -492,3 +492,36 @@ fn uninstall_requires_confirmation_and_wiring_matches() {
         "卸载后必须删除运行状态文件——否则下次启动不会重新走向导"
     );
 }
+
+// ============================================================================
+// 探针检测（增补任务）
+// ============================================================================
+
+/// 探针功能的前后端契约：
+/// - api.ts 的命令名与结果类型必须与后端对齐（断言完整调用形态，防变体误报）；
+/// - lib.rs 必须真的注册了两条命令——漏注册 = 前端调用运行时落空；
+/// - 设置页必须真的接了「检测」与「移除探针」两个入口。
+#[test]
+fn probe_wiring_matches() {
+    let api = strip_line_comments(&repo_file("src/api.ts"));
+    assert!(
+        api.contains(r#"invoke<ProbeOutcome>("run_tool_probe", { toolId })"#),
+        "api.ts 的探针命令名或结果类型与后端对不上"
+    );
+    assert!(
+        api.contains(r#"invoke<string>("remove_tool_probe", { toolId })"#),
+        "api.ts 的探针移除命令名与后端对不上"
+    );
+
+    let lib = strip_line_comments(&repo_file("src-tauri/src/lib.rs"));
+    assert!(
+        lib.contains("commands::run_tool_probe") && lib.contains("commands::remove_tool_probe"),
+        "探针命令没有注册进 invoke_handler——前端调用会在运行时落空"
+    );
+
+    let main_view = strip_line_comments(&repo_file("src/views/MainView.vue"));
+    assert!(
+        main_view.contains("startProbe") && main_view.contains("clearProbe"),
+        "设置页缺少探针的检测/移除入口"
+    );
+}

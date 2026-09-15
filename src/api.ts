@@ -245,6 +245,37 @@ export function onSyncProgress(
   return listen<ToolSyncResult>("sync://progress", (event) => handler(event.payload));
 }
 
+// ── 探针检测（增补任务：验证工具真的读到了 CrossBrain 的内容）──
+
+/** 探针结果状态。 */
+export type ProbeStatus = "verified" | "needsManual" | "failed";
+
+/** 单个工具的探针结果。 */
+export interface ProbeOutcome {
+  toolId: string;
+  displayName: string;
+  status: ProbeStatus;
+  /** 本次探针的唯一标记（`cb-probe-<时间戳>`），人工验证时用它对答案 */
+  token: string;
+  /** 面向用户的说明 */
+  message: string;
+}
+
+/**
+ * 对一个工具执行探针检测：往它的技能目录写一条临时探针技能，
+ * 能自动取证的（Codex）直接给出结论。
+ *
+ * Codex 侧会真实启动它的检测命令（最长约 30 秒），按钮会转圈，属正常现象。
+ */
+export function runToolProbe(toolId: string): Promise<ProbeOutcome> {
+  return invoke<ProbeOutcome>("run_tool_probe", { toolId });
+}
+
+/** 移除一个工具的探针（幂等：本来没有就说明无需清理）。 */
+export function removeToolProbe(toolId: string): Promise<string> {
+  return invoke<string>("remove_tool_probe", { toolId });
+}
+
 // ============================================================================
 // 纯展示常量（前端本地知识，不来自 Rust）
 // ============================================================================
