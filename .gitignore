@@ -36,3 +36,4 @@ dist-ssr
 # --- 其他 ---
 Thumbs.db
 Desktop.ini
+.env
