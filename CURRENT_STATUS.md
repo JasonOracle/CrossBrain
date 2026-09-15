@@ -9,11 +9,11 @@
 
 | 项目 | 状态 |
 |:---|:---|
-| **当前阶段** | 🎉 **第 4 阶段：系统验证与打包 — 全部完成；TASK-09（SSOT 版本化）✅、TASK-22（OpenCode 接入）✅ 增补收官**。**TASK-15/16/17 ✅**、**TASK-09 ✅**、**TASK-20 ✅ → 已被 TASK-21 取代**、**TASK-21 ✅（工具接入）**、**TASK-22 ✅（OpenCode）**——支持工具数 **4**（Claude Code / Antigravity IDE / Codex / OpenCode），V1 全部任务收官，剩余未适配工具按用户意愿排期 |
+| **当前阶段** | 🎉 **V1.0.0 正式发布（2026-09-15 定版）**。第 4 阶段全部收官 + TASK-09（SSOT 版本化）✅ + TASK-22（OpenCode 接入）✅ + 版本号 0.1.0 → **1.0.0**、CHANGELOG.md 建立、生产构建产出 v1.0.0 安装包。支持工具数 **4**（Claude Code / Antigravity IDE / Codex / OpenCode），剩余未适配工具（codebuddy / workbuddy / cursor / trae / zcode / qoder）转入 V1.5 按意愿排期 |
 | **当前日期** | 2026-09-15 |
 | **计划交付** | 2026-09-28（两周） |
-| **下一个任务** | 待用户拍板：剩余未适配工具（codebuddy / workbuddy / cursor / trae / zcode / qoder）中选下一个接入（每个含 Spike 实测，流程见 `.workbuddy/skills/crossbrain-add-adapter`）<br>✅ `TASK-22`（增补）**已于 2026-09-15 15:17 完成**：OpenCode Adapter——二进制取证 + 无头探针实证落点（AGENTS.md 内联全文 + `skills/` 技能根，L0 落点是硬链接组成员首注断链走 ADR-15 闸门）；cargo test 167 passed；干跑 0 未通过；真实数据零改动<br>✅ `TASK-09` **已于 2026-09-15 14:40 完成**：`~/.ai-profile` 自动 git init + 同步末尾自动提交（`sync: <ISO-8601>`）；未装 git 静默降级、提交失败不影响同步结果；**T7-3/T8-1/T8-3 已回补**；真机实跑验证（建仓提交/幂等/数据零改动）<br>✅ `TASK-17`（增补）**已于 2026-09-15 14:01 完成**：`pnpm tauri build` 零 error；MSI（2.6 MB）+ NSIS setup（1.8 MB）+ 便携 zip（`dist-release/`，2.3 MB）；release exe 独立进程启动实测正常；MSI 双击安装留用户验证（**14:52 已重建，含 TASK-09**）<br>✅ `TASK-21`（增补）**已于 2026-09-15 13:05 完成**：设置页「工具接入」——扫描本机 10 类工具（纯只读）→ 复选框勾选（未适配工具登记意愿）→ 保存即按新范围同步；探针 UI 移除；真机走查 11/11 通过<br>✅ `TASK-20`（增补）**已于 2026-09-15 12:01 完成**：设置页「工具读取检测」——写临时探针技能 + Codex 全自动取证（`codex debug prompt-input`）+ 移除/同步/卸载三重清理；真机端到端通过<br>✅ `TASK-16` **已于 2026-09-15 11:24 完成**：T7-1/T7-2 通过（CDP 离线模拟）；T7-3 与 T8-1/T8-3 依赖暂缓的 TASK-09，随其回补<br>✅ `TASK-15` 已于 2026-09-15 11:12 完成：T9-1/T9-2 真机端到端通过（含 Codex `debug prompt-input` 实证技能加载）+ 积压 GUI 走查；**发现并修复 MainView 未加载规则内容的 BUG**；T10 真机确认卸载留用户执行<br>✅ `TASK-14` 已于 2026-09-15 10:30 完成：三工具去痕 + 标记块外内容保留 + 状态文件删除回向导<br>✅ `TASK-13` 已于 2026-09-15 09:58 完成：离线指示红色化 + 失败原因可点击展开 + report.ok 权威判定；git commit 一项顺延 TASK-09<br>✅ `TASK-12` 已于 2026-09-15 09:48 完成：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原 |
-| **环境状态** | ✅ Rust 1.98.1 (MSVC) + VS Build Tools 2022；`~/.ai-profile/` SSOT 底座就绪；**IPC 层已打通，首次运行向导已端到端验证**；**支持工具数 2 → 3**（Claude Code / Antigravity IDE / Codex） |
+| **下一个任务** | ✅ **V1.0.0 已定版发布（2026-09-15 15:29）**：版本号三处 0.1.0→1.0.0、CHANGELOG.md 建立、`pnpm tauri build` 产出 v1.0.0 MSI/NSIS/便携 zip（含 OpenCode 支持与版本历史功能）。后续方向（V1.5，待拍板）：剩余未适配工具接入（codebuddy / workbuddy / cursor / trae / zcode / qoder，每个含 Spike 实测，流程见 `.workbuddy/skills/crossbrain-add-adapter`）<br>✅ `TASK-22`（增补）**已于 2026-09-15 15:17 完成**：OpenCode Adapter——二进制取证 + 无头探针实证落点（AGENTS.md 内联全文 + `skills/` 技能根，L0 落点是硬链接组成员首注断链走 ADR-15 闸门）；cargo test 167 passed；干跑 0 未通过；真实数据零改动<br>✅ `TASK-09` **已于 2026-09-15 14:40 完成**：`~/.ai-profile` 自动 git init + 同步末尾自动提交（`sync: <ISO-8601>`）；未装 git 静默降级、提交失败不影响同步结果；**T7-3/T8-1/T8-3 已回补**；真机实跑验证（建仓提交/幂等/数据零改动）<br>✅ `TASK-17`（增补）**已于 2026-09-15 14:01 完成**：`pnpm tauri build` 零 error；MSI（2.6 MB）+ NSIS setup（1.8 MB）+ 便携 zip（`dist-release/`，2.3 MB）；release exe 独立进程启动实测正常；MSI 双击安装留用户验证（**14:52 已重建，含 TASK-09**）<br>✅ `TASK-21`（增补）**已于 2026-09-15 13:05 完成**：设置页「工具接入」——扫描本机 10 类工具（纯只读）→ 复选框勾选（未适配工具登记意愿）→ 保存即按新范围同步；探针 UI 移除；真机走查 11/11 通过<br>✅ `TASK-20`（增补）**已于 2026-09-15 12:01 完成**：设置页「工具读取检测」——写临时探针技能 + Codex 全自动取证（`codex debug prompt-input`）+ 移除/同步/卸载三重清理；真机端到端通过<br>✅ `TASK-16` **已于 2026-09-15 11:24 完成**：T7-1/T7-2 通过（CDP 离线模拟）；T7-3 与 T8-1/T8-3 依赖暂缓的 TASK-09，随其回补<br>✅ `TASK-15` 已于 2026-09-15 11:12 完成：T9-1/T9-2 真机端到端通过（含 Codex `debug prompt-input` 实证技能加载）+ 积压 GUI 走查；**发现并修复 MainView 未加载规则内容的 BUG**；T10 真机确认卸载留用户执行<br>✅ `TASK-14` 已于 2026-09-15 10:30 完成：三工具去痕 + 标记块外内容保留 + 状态文件删除回向导<br>✅ `TASK-13` 已于 2026-09-15 09:58 完成：离线指示红色化 + 失败原因可点击展开 + report.ok 权威判定；git commit 一项顺延 TASK-09<br>✅ `TASK-12` 已于 2026-09-15 09:48 完成：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原 |
+| **环境状态** | ✅ Rust 1.98.1 (MSVC) + VS Build Tools 2022；`~/.ai-profile/` SSOT 底座就绪（已 git 化）；**IPC 层已打通，首次运行向导已端到端验证**；**支持工具数 4**（Claude Code / Antigravity IDE / Codex / OpenCode） |
 
 ---
 
@@ -340,6 +340,18 @@
 > ```
 
 ---
+
+### 2026-09-15 15:29:00 — WorkBuddy（GLM-5.3-Flash）
+
+- 完成：**V1.0.0 定版发布**（用户指令「接入 opencode 然后当做 v1.0 发布」；OpenCode 即 TASK-22，已完成于 15:17）。
+  版本号三处 0.1.0 → 1.0.0（package.json / Cargo.toml / tauri.conf.json，Cargo.lock 由 cargo 自动同步）；
+  新建 `CHANGELOG.md`（Keep a Changelog 格式，含完整功能清单与已知限制）；
+  清理旧 0.1.0 bundle 后 `pnpm tauri build` 产出 v1.0.0 MSI / NSIS setup / 便携 zip
+  （`dist-release/CrossBrain_1.0.0_portable.zip`）；release exe 独立进程启动验证正常。
+- 修改了文件：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、
+  `src-tauri/Cargo.lock`、`CHANGELOG.md`（新建）、`CURRENT_STATUS.md`。
+- 注意事项：① 未配代码签名证书，首次运行会有 SmartScreen/未知发布者提示（已写入 CHANGELOG 已知限制）；
+  ② 发布到 GitHub Releases / OSS 镜像等分发渠道动作未做（RELEASE.md SOP 的 Step 5-7），需要时按 SOP 执行。
 
 ### 2026-09-15 15:17:00 — WorkBuddy（GLM-5.3-Flash）
 
