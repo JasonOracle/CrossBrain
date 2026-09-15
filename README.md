@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 CrossBrain（跨脑）
+# 🧠 CrossBrain（记忆穿梭）
 
 **Write your AI coding preferences once. Use them everywhere. / 写一次 AI 规则，处处可用。**
 
