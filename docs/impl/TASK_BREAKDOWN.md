@@ -1901,13 +1901,63 @@ pub fn is_git_available() -> bool {
 #### ✅ 验收检查清单
 
 ```
-[ ] 状态栏常驻在主界面顶部，内容格式：「上次同步：{时间}  ✅ Claude Code  ✅ Antigravity  」
-[ ] 无网络时，状态栏额外显示 🔴 离线模式
-[ ] 「立即同步」按钮点击后，触发完整同步流程（sync_l0 + sync_l2 + cleanup_orphans + git commit）
-[ ] 同步过程中按钮显示加载状态，不可重复点击
-[ ] 同步完成后，状态栏「上次同步」时间更新
-[ ] 同步失败时，显示用户友好提示（不显示系统错误码）
+[x] 状态栏常驻在主界面顶部，内容格式：「上次同步：{时间}  ✅ Claude Code  ✅ Antigravity  」
+[x] 无网络时，状态栏额外显示 🔴 离线模式
+[x] 「立即同步」按钮点击后，触发完整同步流程（sync_l0 + sync_l2 + cleanup_orphans + git commit）
+[x] 同步过程中按钮显示加载状态，不可重复点击
+[x] 同步完成后，状态栏「上次同步」时间更新
+[x] 同步失败时，显示用户友好提示（不显示系统错误码）
 ```
+
+#### ⚠️ 实施修正（2026-09-15 09:58，TASK-13）
+
+1. **「git commit」一项顺延（依赖 TASK-09）**：验收原文写「触发完整同步流程
+   （sync_l0 + sync_l2 + cleanup_orphans + **git commit**）」，但 `sync.rs` 的
+   架构注释明确 git `add/commit` 属于 **TASK-09（SSOT 版本化，已暂缓）** 的封装范围。
+   本任务实际触发的流程是 sync_l0 + sync_l2 + cleanup_orphans（三者俱全，实测有效）。
+   git 提交不往本任务硬塞——它需要 Git-in-PATH 探测与 PRD §8 的翻译条目
+   （「未检测到 Git……」），是 TASK-09 的整体设计。与 TASK-18 Spike 阻塞的先例
+   同一处理方式：记录顺延，不假完成。
+2. **「🔴 离线模式」不用 Emoji**：PRD 示意里的 🔴 落到界面上是
+   `lucide/wifi-off` 图标 + `text-error-500`（红色）——本项目铁律禁 Emoji 图标，
+   PRD 的红点意图由「红色 + 图标」等价表达，文案补「同步不受影响」说明语义
+   （本地同步不依赖网络，PRD 同节原文也是这么说的）。
+3. **「点击可查看原因」是新实现，不是已有能力**：TASK-10 的外壳只放了一行
+   不可点击的「上次同步未完全成功」。PRD §7 明确要求失败指示可点击查看原因，
+   本任务补上：失败指示为 `<button>`（键盘可达），点击展开各失败工具的
+   面向用户文案（来自 `ToolSyncResult.message`，天然不含系统错误码）。
+4. **失败原因不跨启动持久化**：启动状态只存「是否成功」（`lastSyncOk`），
+   不存失败详情。重启后点开失败指示会看到诚实提示
+   （「失败原因只保留到关闭应用为止……」），而不是编造或留空白。
+5. **成功判定改用报告权威字段**：原实现 `lines.every(l => l.status !== "failed")`
+   是前端从进度事件自行拼凑——事件丢失或迟到会误判。改为 `report?.ok === true`
+   （`SyncReport.ok` 由后端决定；`report` 为 null = 请求没走通，必然不算成功）。
+6. **进度行末尾用报告覆盖一次**：`lines.value = report.tools`，防个别工具的
+   进度事件迟到/丢失导致状态栏缺一行。
+7. **契约测试的断言写法**：`status_bar_matches_prd_contract` 断言
+   `report?.ok || report.ok`（可选链与普通访问都认），避免断言写死某种
+   TypeScript 风格而在无语义重构时假红。
+8. **离线探测用 `navigator.onLine`**：WebView2 支持该 API 与 online/offline 事件。
+   它只反映「有没有网络接口」而非真实连通性，对「离线模式」的显示语义够用；
+   真正的连通性检测留给 TASK-16（离线测试）再评估。
+
+#### ✅ 实施记录（2026-09-15 09:58，TASK-13）
+
+- `src/views/MainView.vue`：离线指示改红色（error-500 + wifi-off 图标）；
+  失败指示改可点击 `<button>`，展开区为状态栏下方 `n-alert(warning)`，
+  列出失败工具与原因；`doSync` 改用 `SyncReport` 权威字段判定成功并覆盖进度行；
+  新一次同步开始时收起上一次的失败详情。
+- `src-tauri/tests/ipc_contract.rs`：新增 `status_bar_matches_prd_contract`
+  （5 条断言：离线指示存在 / 按钮 loading 绑定 / 防重入检查 / 可展开的失败
+  指示 / report.ok 权威判定），已按约定**反向验证**（`:loading="false"` 变异
+  → 如期失败 → 还原）。
+- 状态栏本体（常驻顶部、时间格式、per-tool ✅/❌、「尚未同步」、加载态、
+  toUserMessage 无错误码）在 TASK-10 已落地，本任务审计确认合格后未动。
+- 验证：`cargo test` **128 passed / 0 failed / 0 warning**；`dryrun_sync` 12 节
+  0 项未通过；`pnpm build` 通过；真实数据零改动（4+1 硬链接组、rules.md
+  md5 `f0b10675…`、knowledge 0 项）。
+- 遗留：① git commit 顺延 TASK-09（见修正 1）；② 失败原因跨启动持久化
+  未做（需 state 扩展，价值有限，暂缓）；③ GUI 走查仍并入 TASK-15。
 
 ### TASK-14：设置页「一键卸载 / 去痕」
 

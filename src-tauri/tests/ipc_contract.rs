@@ -406,3 +406,43 @@ fn knowledge_manager_never_triggers_sync() {
         "KnowledgeManager.vue 里找不到知识库读写调用——链路断了，上面的断言因此恒为真"
     );
 }
+
+// ============================================================================
+// TASK-13：同步状态栏（PRD §7）
+// ============================================================================
+
+/// 状态栏的三条 PRD 行为必须在源码里真实存在（TASK-13）。
+///
+/// PRD §7 不只要求「显示」，还给了交互语义：
+/// - 离线指示：无网络时出现（`v-if="!online"`）
+/// - 「立即同步」按钮在同步过程中必须处于加载态且不可重复点击
+///   （`:loading="syncing"` + `if (syncing.value) return` 双保险）
+/// - 上次同步失败必须**可点击查看原因**（`showSyncFailure`），
+///   不能只是一行死文字——用户不知道为什么失败就不知道怎么自救
+/// - 成功与否取自同步报告的权威字段 `report.ok`，
+///   而不是前端从进度事件自行拼凑
+#[test]
+fn status_bar_matches_prd_contract() {
+    let code = strip_line_comments(&repo_file("src/views/MainView.vue"));
+
+    assert!(
+        code.contains("v-if=\"!online\""),
+        "状态栏没有离线指示——无网络时用户看不到 PRD §7 要求的「离线模式」"
+    );
+    assert!(
+        code.contains(":loading=\"syncing\""),
+        "「立即同步」按钮没有绑定加载状态——同步过程中可被重复点击"
+    );
+    assert!(
+        code.contains("if (syncing.value) return"),
+        "「立即同步」入口没有防重入检查——快速连点可能并发触发两次同步"
+    );
+    assert!(
+        code.contains("showSyncFailure"),
+        "状态栏的失败指示不可点击展开——PRD §7 明确要求「点击可查看原因」"
+    );
+    assert!(
+        code.contains("report?.ok") || code.contains("report.ok"),
+        "同步成功与否没有采用报告的权威字段 report.ok——前端自行判定会与后端真相分叉"
+    );
+}

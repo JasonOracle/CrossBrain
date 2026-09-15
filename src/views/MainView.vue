@@ -92,6 +92,19 @@ const restoreError = ref("");
 /** 状态栏上「上次同步」的展示值 */
 const lastSyncLabel = computed(() => lastSyncAt.value ?? "尚未同步");
 
+/**
+ * 失败原因是否展开显示（PRD §7：「上次同步失败（点击可查看原因）」）。
+ *
+ * ⚠️ 原因**只保留在本次会话里**——启动状态只持久化了「是否成功」，
+ * 没有持久化失败详情。重启后点开只会看到诚实提示，而不是编一段原因。
+ */
+const showSyncFailure = ref(false);
+
+/** 各失败工具的面向用户文案（不含系统错误码，PRD §8） */
+const syncFailures = computed(() =>
+  lines.value.filter((l) => l.status === "failed").map((l) => `${l.displayName}：${l.message}`),
+);
+
 /** 各工具的状态图标：来自本次同步结果 */
 const toolStates = computed(() => lines.value);
 
@@ -136,12 +149,18 @@ async function doSync() {
   errorText.value = "";
   lines.value = [];
 
+  // 报告提到 try 外面：finally 里要按它判定「上次同步是否成功」
+  let report: SyncReport | null = null;
+
   try {
     unlisten = await onSyncProgress((progress) => {
       lines.value = [...lines.value, progress];
     });
 
-    const report: SyncReport = await runSync();
+    report = await runSync();
+    // 进度事件逐条到达后，用最终报告覆盖一次：报告是权威结果，
+    // 免得某个工具的事件迟到或丢失导致状态栏缺一行
+    lines.value = report.tools;
     if (report.error) {
       errorText.value = report.error;
     }
@@ -152,7 +171,10 @@ async function doSync() {
     unlisten = null;
     syncing.value = false;
     lastSyncAt.value = currentLocalTime();
-    lastSyncOk.value = !errorText.value && lines.value.every((l) => l.status !== "failed");
+    // report 为 null = 请求本身没走通（异常分支），必然不算成功
+    lastSyncOk.value = !errorText.value && report?.ok === true;
+    // 新一次同步开始了：上一次的失败详情收起，避免展示过期原因
+    showSyncFailure.value = false;
     // 同步可能刚产生了备份，顺手刷新——否则设置区要等下次切标签才更新
     void loadBackups();
   }
@@ -264,15 +286,22 @@ function currentLocalTime(): string {
           {{ line.displayName }}
         </span>
 
-        <span
+        <!--
+          失败指示必须可点击（PRD §7：「❌ 红色：上次同步失败（点击可查看原因）」）。
+          用 button 而不是 span：键盘用户也要能展开。
+        -->
+        <button
           v-if="lastSyncAt && !lastSyncOk"
-          class="text-xs text-error-500"
+          type="button"
+          class="text-xs text-error-500 underline decoration-dotted underline-offset-2"
+          @click="showSyncFailure = !showSyncFailure"
         >
-          上次同步未完全成功
-        </span>
+          上次同步未完全成功（点击{{ showSyncFailure ? "收起" : "查看原因" }}）
+        </button>
 
         <span class="ml-auto flex items-center gap-3">
-          <span v-if="!online" class="flex items-center gap-1 text-xs text-neutral-500">
+          <!-- 离线指示（PRD §7 用红点表达；本地同步不依赖网络，文案如实说明） -->
+          <span v-if="!online" class="flex items-center gap-1 text-xs text-error-500">
             <IconWifiOff class="h-3.5 w-3.5" aria-hidden="true" />
             离线模式（同步不受影响）
           </span>
@@ -293,6 +322,22 @@ function currentLocalTime(): string {
         :bordered="false"
       >
         {{ errorText }}
+      </n-alert>
+
+      <!-- 失败原因展开区（本次会话内有效；重启后诚实说明原因不保留） -->
+      <n-alert
+        v-if="showSyncFailure && lastSyncAt && !lastSyncOk"
+        class="mx-auto max-w-5xl rounded-none"
+        type="warning"
+        :bordered="false"
+      >
+        <template v-if="syncFailures.length > 0">
+          <p v-for="f in syncFailures" :key="f">{{ f }}</p>
+        </template>
+        <template v-else>
+          失败原因只保留到关闭应用为止。再点一次「立即同步」，如果仍然失败，
+          这里会显示每个工具的具体原因。
+        </template>
       </n-alert>
     </header>
 
