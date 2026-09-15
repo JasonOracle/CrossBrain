@@ -60,6 +60,8 @@ const lastSyncOk = ref(props.startup?.lastSyncOk ?? false);
 const syncing = ref(false);
 const lines = ref<ToolSyncResult[]>([]);
 const errorText = ref("");
+/** 本地版本历史（git 提交）的非阻塞提示：同步成功但提交失败时才有值 */
+const historyNote = ref("");
 
 const online = ref(typeof navigator === "undefined" ? true : navigator.onLine);
 let unlisten: UnlistenFn | null = null;
@@ -200,6 +202,7 @@ function syncNow() {
 async function doSync() {
   syncing.value = true;
   errorText.value = "";
+  historyNote.value = "";
   lines.value = [];
 
   // 报告提到 try 外面：finally 里要按它判定「上次同步是否成功」
@@ -217,6 +220,7 @@ async function doSync() {
     if (report.error) {
       errorText.value = report.error;
     }
+    historyNote.value = report.historyNote ?? "";
   } catch (e) {
     errorText.value = toUserMessage(e);
   } finally {
@@ -375,6 +379,7 @@ async function doSaveTools() {
     lastSyncOk.value = report.ok;
     showSyncFailure.value = false;
     errorText.value = report.error ?? "";
+    historyNote.value = report.historyNote ?? "";
     // 新接入的工具可能刚产生了备份，顺手刷新备份区
     void loadBackups();
     refreshEnabledNames();
@@ -485,6 +490,16 @@ function currentLocalTime(): string {
         :bordered="false"
       >
         {{ errorText }}
+      </n-alert>
+
+      <!-- 本地版本历史提交失败：非阻塞提示，同步本身已成功 -->
+      <n-alert
+        v-if="historyNote"
+        class="mx-auto max-w-5xl rounded-none"
+        type="warning"
+        :bordered="false"
+      >
+        {{ historyNote }}
       </n-alert>
 
       <!-- 失败原因展开区（本次会话内有效；重启后诚实说明原因不保留） -->

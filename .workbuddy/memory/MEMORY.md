@@ -38,6 +38,7 @@
 
 - **ADR-14**：SSOT 读取失败即整体中止，绝不退化为空——`cleanup_orphans()` 空列表 = 删光用户全部技能。`knowledge/` 任一文件读不出就不调任何 Adapter。失败可见可重试，误删不可逆。
 - 空规则不推 L0（空标记块白触发备份+断链）。git 提交失败不得影响同步结果。
+- **SSOT 版本历史（TASK-09，2026-09-15 已实现）**：`git.rs` 在同步成功末尾幂等建仓+提交（`sync: <chrono ISO-8601>`）；未装 git **完全静默**降级（不弹 UI 提示）；提交真失败→`SyncReport.historyNote` 非阻塞提示。身份兜底只 `-c` 注入**不写任何 git 配置文件**。`nothing to commit` 在 Windows 走 stdout（stderr 空时须回落查 stdout）。`~/.ai-profile` 已是 git 仓库（.git 勿删勿改）。
 - **写入边界**：只写 L0 规则文件、`crossbrain-*` 技能目录、`*.crossbrain-backup`。`settings.json`/`config.toml`/`mcp_config.json`/`rules/default.rules`/`skills/.system/`/`~/.agents/` 零引用。
 - **ADR-15（TASK-19 已实现）**：`.crossbrain-backup` = 首注前原始件**任何路径不得覆盖**；`.crossbrain-before-restore` = 还原前现场，滚动、仅当场 ≠ 备份才写。还原必须走 `write_breaking_hardlink()`。前端闸门 `useLinkNotice.ts`：标记「已展示」写在 `confirm()` 内（契约测试锁定）。
 

@@ -106,6 +106,12 @@ pub struct SyncReport {
     /// 同步在开始前就被中止的原因（面向用户）。
     /// `Some` 时 `tools` 必为空——中止意味着一个 Adapter 都没被调用。
     pub error: Option<String>,
+    /// 本地版本历史（git 提交）的非阻塞提示（TASK-09）。
+    ///
+    /// 只在**同步成功但提交失败**时出现：内容已落盘，版本历史只是附带
+    /// 便利功能（PRD 第 4 节），故失败不改变 `ok`、不进 `error`。
+    /// git 未安装时静默降级，此字段为 `None`（无感）。
+    pub history_note: Option<String>,
 }
 
 /// 工具检测结果（向导步骤 2 展示）。
@@ -845,10 +851,11 @@ pub fn run_full_sync() -> SyncReport {
 ///
 /// # 关于 Git 提交
 ///
-/// `ARCHITECTURE.md` 第 3 节的 Step 4（`git add/commit`）由 TASK-09 封装。
-/// 该模块尚未实现（用户本机也尚未建立仓库），故此处只保留调用位置：
-/// 它应当在本函数返回前执行，且失败**不影响**同步结果——
-/// 同步的内容已经落盘，版本历史只是附带的便利功能（见 `PRD.md` 第 4 节）。
+/// `ARCHITECTURE.md` 第 3 节的 Step 4（`git add/commit`）由 `git.rs`（TASK-09）封装。
+/// 在本函数返回前执行，且**失败不影响同步结果**——同步的内容已经落盘，
+/// 版本历史只是附带的便利功能（见 `PRD.md` 第 4 节）：
+/// - git 未安装 → 静默降级（`Ok(())`），报告无任何痕迹；
+/// - 提交真失败 → `history_note` 带一条非阻塞提示，`ok` 不变。
 pub fn run_full_sync_with_progress(on_progress: &mut dyn FnMut(ToolSyncResult)) -> SyncReport {
     // ── Step 1. 读取 SSOT（失败即整体中止，不进入任何写入流程）──
     let rules = match read_global_rules() {
@@ -863,12 +870,24 @@ pub fn run_full_sync_with_progress(on_progress: &mut dyn FnMut(ToolSyncResult)) 
     // ── Step 2/3. 逐个工具同步（范围 = 用户在「工具接入」里保存的清单，
     //    从未保存过则默认三个已适配工具全跑）──
     let selected = crate::state::load().selected_tools;
-    run_for_tools(
+    let mut report = run_for_tools(
         &filter_tools_with(build_tools(), selected.as_deref()),
         &rules,
         &knowledge,
         on_progress,
-    )
+    );
+
+    // ── Step 4. 本地版本历史（TASK-09）：失败绝不改变同步结果 ──
+    if report.ok {
+        if let Err(e) = crate::git::commit_sync() {
+            eprintln!("CrossBrain 本地版本历史提交失败：{}", e);
+            report.history_note = Some(
+                "同步已成功，但本地版本历史（git 提交）失败：".to_string() + &e,
+            );
+        }
+    }
+
+    report
 }
 
 /// 对给定的工具集合执行一次同步（**不含 SSOT 读取，不做路径推断**）。
@@ -918,6 +937,7 @@ pub fn run_for_tools(
         skill_count: knowledge.len(),
         ok,
         error: None,
+        history_note: None,
     }
 }
 
@@ -994,6 +1014,7 @@ fn aborted(message: String) -> SyncReport {
         skill_count: 0,
         ok: false,
         error: Some(message),
+        history_note: None,
     }
 }
 

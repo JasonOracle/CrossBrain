@@ -9,10 +9,10 @@
 
 | 项目 | 状态 |
 |:---|:---|
-| **当前阶段** | 🎉 **第 4 阶段：系统验证与打包 — 全部完成**。**TASK-15 ✅（端到端测试）**、**TASK-16 ✅（离线测试）**、**TASK-17 ✅（生产构建：MSI + NSIS + 便携 zip）**、**TASK-20 ✅ → 已被 TASK-21 取代**、**TASK-21 ✅（工具接入）**——V1 功能开发收官，剩余 TASK-09（SSOT git 化）及 7 个未适配工具按意愿排期 |
+| **当前阶段** | 🎉 **第 4 阶段：系统验证与打包 — 全部完成；TASK-09（SSOT 版本化）✅ 补齐**。**TASK-15 ✅（端到端测试）**、**TASK-16 ✅（离线测试）**、**TASK-17 ✅（生产构建）**、**TASK-09 ✅（本地 git 版本历史）**、**TASK-20 ✅ → 已被 TASK-21 取代**、**TASK-21 ✅（工具接入）**——V1 全部任务收官，仅剩 7 个未适配工具按用户意愿排期接入 |
 | **当前日期** | 2026-09-15 |
 | **计划交付** | 2026-09-28（两周） |
-| **下一个任务** | `TASK-09`：SSOT 版本化（`~/.ai-profile` git 化 + 本地 git 提交）——落地后回补 T7-3/T8-1/T8-3<br>✅ `TASK-17`（增补）**已于 2026-09-15 14:01 完成**：`pnpm tauri build` 零 error；MSI（2.6 MB）+ NSIS setup（1.8 MB）+ 便携 zip（`dist-release/`，2.3 MB）；release exe 独立进程启动实测正常；MSI 双击安装留用户验证<br>✅ `TASK-21`（增补）**已于 2026-09-15 13:05 完成**：设置页「工具接入」——扫描本机 10 类工具（纯只读）→ 复选框勾选（未适配工具登记意愿）→ 保存即按新范围同步；探针 UI 移除；真机走查 11/11 通过<br>✅ `TASK-20`（增补）**已于 2026-09-15 12:01 完成**：设置页「工具读取检测」——写临时探针技能 + Codex 全自动取证（`codex debug prompt-input`）+ 移除/同步/卸载三重清理；真机端到端通过<br>✅ `TASK-16` **已于 2026-09-15 11:24 完成**：T7-1/T7-2 通过（CDP 离线模拟）；T7-3 与 T8-1/T8-3 依赖暂缓的 TASK-09，随其回补<br>✅ `TASK-15` 已于 2026-09-15 11:12 完成：T9-1/T9-2 真机端到端通过（含 Codex `debug prompt-input` 实证技能加载）+ 积压 GUI 走查；**发现并修复 MainView 未加载规则内容的 BUG**；T10 真机确认卸载留用户执行<br>✅ `TASK-14` 已于 2026-09-15 10:30 完成：三工具去痕 + 标记块外内容保留 + 状态文件删除回向导<br>✅ `TASK-13` 已于 2026-09-15 09:58 完成：离线指示红色化 + 失败原因可点击展开 + report.ok 权威判定；git commit 一项顺延 TASK-09<br>✅ `TASK-12` 已于 2026-09-15 09:48 完成：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原 |
+| **下一个任务** | 待用户拍板：从「工具接入」弹窗登记的 7 个未适配工具（opencode / codebuddy / workbuddy / cursor / trae / zcode / qoder）中选下一个接入（每个含 Spike 实测，流程见 `.workbuddy/skills/crossbrain-add-adapter`）<br>✅ `TASK-09` **已于 2026-09-15 14:40 完成**：`~/.ai-profile` 自动 git init + 同步末尾自动提交（`sync: <ISO-8601>`）；未装 git 静默降级、提交失败不影响同步结果；**T7-3/T8-1/T8-3 已回补**；真机实跑验证（建仓提交/幂等/数据零改动）<br>✅ `TASK-17`（增补）**已于 2026-09-15 14:01 完成**：`pnpm tauri build` 零 error；MSI（2.6 MB）+ NSIS setup（1.8 MB）+ 便携 zip（`dist-release/`，2.3 MB）；release exe 独立进程启动实测正常；MSI 双击安装留用户验证<br>✅ `TASK-21`（增补）**已于 2026-09-15 13:05 完成**：设置页「工具接入」——扫描本机 10 类工具（纯只读）→ 复选框勾选（未适配工具登记意愿）→ 保存即按新范围同步；探针 UI 移除；真机走查 11/11 通过<br>✅ `TASK-20`（增补）**已于 2026-09-15 12:01 完成**：设置页「工具读取检测」——写临时探针技能 + Codex 全自动取证（`codex debug prompt-input`）+ 移除/同步/卸载三重清理；真机端到端通过<br>✅ `TASK-16` **已于 2026-09-15 11:24 完成**：T7-1/T7-2 通过（CDP 离线模拟）；T7-3 与 T8-1/T8-3 依赖暂缓的 TASK-09，随其回补<br>✅ `TASK-15` 已于 2026-09-15 11:12 完成：T9-1/T9-2 真机端到端通过（含 Codex `debug prompt-input` 实证技能加载）+ 积压 GUI 走查；**发现并修复 MainView 未加载规则内容的 BUG**；T10 真机确认卸载留用户执行<br>✅ `TASK-14` 已于 2026-09-15 10:30 完成：三工具去痕 + 标记块外内容保留 + 状态文件删除回向导<br>✅ `TASK-13` 已于 2026-09-15 09:58 完成：离线指示红色化 + 失败原因可点击展开 + report.ok 权威判定；git commit 一项顺延 TASK-09<br>✅ `TASK-12` 已于 2026-09-15 09:48 完成：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原 |
 | **环境状态** | ✅ Rust 1.98.1 (MSVC) + VS Build Tools 2022；`~/.ai-profile/` SSOT 底座就绪；**IPC 层已打通，首次运行向导已端到端验证**；**支持工具数 2 → 3**（Claude Code / Antigravity IDE / Codex） |
 
 ---
@@ -166,7 +166,11 @@
 - ✅ **TASK-06**：实现 `ClaudeCodeAdapter`（含标记块四情况协议、备份机制、D-03 断链写入策略）（2026-09-14 完成）
 - ✅ **TASK-07**：实现 Slug-Hash 生成算法（`slug.rs`）（2026-09-14 完成）
 - ✅ **TASK-08**：孤儿清理一致性验证（2026-09-14 完成）
-- 🔲 **TASK-09**：封装本地 Git 提交（`git.rs`，含 `nothing to commit` 静默处理）— ⏸️ **暂缓**（用户本机尚未建仓库；接入位置已在 `sync.rs` 预留）
+- ✅ **TASK-09**（2026-09-15 14:40，原暂缓解除）：封装本地 Git 提交——
+  `git.rs` 幂等建仓 + 同步末尾自动提交（`sync: <ISO-8601>`，chrono 生成）；
+  未装 git 静默降级、提交失败不影响同步结果（`historyNote` 非阻塞提示）；
+  身份兜底只 `-c` 注入不写配置；T7-3/T8-1/T8-3 已回补（TEST_PLAN）；
+  真机实跑验证：建仓提交 / 二次幂等 / rules.md md5 前后一致
 
 ### 增补任务（2026-09-14 用户触发）
 
@@ -332,6 +336,30 @@
 > ```
 
 ---
+
+### 2026-09-15 14:40:00 — WorkBuddy（GLM-5.3-Flash）
+
+- 完成：**TASK-09 本地 Git 提交（原暂缓任务，用户确认仓库结构与触发方式后落地）**。
+  新建 `src-tauri/src/git.rs`：`commit_sync()` → 可注入核心 `commit_with(git, profile)`；
+  流程 = 可用性探测（未装 git → `Ok(())` 静默降级）→ 幂等 `git init` →
+  `git add -A` → `commit -m "sync: <chrono ISO-8601>"`（nothing to commit 静默）。
+  接线 `run_full_sync_with_progress` 末尾 Step 4；`SyncReport.historyNote` 新字段
+  （同步成功但提交失败的非阻塞提示）+ MainView warning alert 展示。
+  **T7-3/T8-1/T8-3 已在 TEST_PLAN 回补**。
+- 修改了文件：`src-tauri/src/git.rs`（新建）、`sync.rs`、`commands.rs`、`lib.rs`、
+  `src/api.ts`、`src/views/MainView.vue`、TEST_PLAN.md、TASK_BREAKDOWN.md（TASK-09 节）、
+  本文件。
+- 注意事项：
+  1. **身份兜底不落盘**：`git config --get user.email` 为空才用 `-c user.name/email`
+     临时注入，绝不写任何 git 配置文件。
+  2. **`nothing to commit` 在 Windows 上走 stdout**，原任务示例只查 stderr——
+     `run()` 在 stderr 为空时回落 stdout。
+  3. **真机验证即功能交付**：`run_full_sync()` 实跑两次，`~/.ai-profile` 已建仓
+     （首提交 `sync: 2026-09-15T14:35:40+0800`，`git ls-files` 仅 `.gitignore` +
+     `global/rules.md`，AGENTS.md/状态文件被 SSOT `.gitignore` 正确排除）；
+     rules.md md5 `f0b10675…` 前后一致。
+  4. 一次性验证工具 `examples/real_sync_once.rs` 用后即删，未入库。
+  5. cargo test 全量 **147 passed / 0 failed**（git 模块新增 5 单测）。
 
 ### 2026-09-15 14:01:00 — WorkBuddy（GLM-5.3-Flash）
 

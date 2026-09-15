@@ -1423,19 +1423,48 @@ mod tests {
 
 ## TASK-09：封装本地 Git 提交
 
-> **⏸️ 暂缓执行（2026-09-14，用户决策）**
->
-> 本机尚未为 `~/.ai-profile/` 建立 git 仓库，用户明确表示「先不急」。
-> 跳过本任务**不影响后续任务的代码编写**，但有两点必须记住：
->
-> 1. `sync.rs` 的同步流程末尾已预留调用位置（见该文件 `run_full_sync_with_progress`
->    的文档注释）。TASK-09 完成后把它接进去即可生效，**不需要再改编排结构**。
-> 2. TASK-13 的验收项「触发完整同步流程（… + git commit）」在 TASK-09 完成前无法勾选。
->
-> ⚠️ **开工前必须先与用户确认仓库结构**：`~/.ai-profile/` 是**用户的数据目录**，
-> 在其中执行 `git init` 属于替用户做决定，且会永久改变该目录的性质。
-> 另需注意 `PRD.md` 第 4 节把「本地版本历史」列为零网络依赖功能，
-> 未装 git 时必须降级为「无历史模式」而不阻断同步——这一降级路径要一并实现。
+> **✅ 已完成（2026-09-15 14:40，GLM-5.3-Flash）**。原「暂缓」决策解除：
+> 用户确认仓库结构（`~/.ai-profile/` 根目录直接 git init）与触发方式
+> （同步末尾自动、未装 git 静默降级）后落地。
+
+#### ✅ 实施记录
+
+- 新建 `src-tauri/src/git.rs`：`commit_sync()`（生产入口）→ `commit_with(git, profile)`
+  （可注入核心）。流程：可用性探测 → 幂等 `git init`（`.git` 存在即跳过）→
+  `git add -A` → `commit -m "sync: <chrono ISO-8601>"`。
+- **身份兜底**：仅当 `git config --get user.email` 为空时以 `-c user.name/-c user.email`
+  临时注入，**不写**任何 git 配置文件，不覆盖用户已有身份。
+- 接线：`run_full_sync_with_progress` 末尾 Step 4（`report.ok` 时提交）；
+  `SyncReport` 新增 `history_note: Option<String>`（camelCase → `historyNote`），
+  同步成功但提交失败时带非阻塞提示，`ok` 不变；git 未安装 → 完全静默（`None`）。
+- 前端：`api.ts` 同步接口 + `MainView.vue` warning alert 展示（同步成功、
+  仅版本历史失败的独立提示条）。
+- `.gitignore` 免写：`AGENTS.md` 与状态文件本就在 SSOT `.gitignore`（init.rs 维护），
+  提交自动跳过——单测 `commit_respects_ssot_gitignore` 锁定。
+
+**验证**：
+
+- cargo test 全量 **147 passed / 0 failed**（git 模块新增 5 单测：降级/全流程/幂等/
+  内容保全/gitignore）；`pnpm build` 通过；干跑 0 未通过。
+- **真机端到端**（生产路径 `run_full_sync()` 实跑两次）：首次自动建仓并提交
+  `sync: 2026-09-15T14:35:40+0800`；`git ls-files` 仅 `.gitignore` + `global/rules.md`
+  （AGENTS.md、状态文件正确排除）；二次同步无变更 → 提交数不变（静默）；
+  **真实数据零改动**（rules.md md5 `f0b10675…` 前后一致、CLAUDE.md 标记块原样）。
+
+#### ⚠️ 实施修正（原文 → 为何错 → 改成什么）
+
+1. 原文示例代码路径硬编码 `profile_root()` 且不可测试 → **改为 `commit_with(git, profile)`
+   双注入**（程序名 + 目录），测试用临时目录 + 假程序名模拟「git 未安装」，
+   真实数据零接触。
+2. 原文 T8-1 通过标准「UI 显示未检测到 Git」→ **改为完全静默**：未装 git 的用户
+   从未拥有过此功能，每次同步弹提示属噪音；装了 git 但提交真失败才提示
+   （`historyNote`）。
+3. 原文示例 `is_git_available()` 是死代码 → **接入 `commit_sync()` 前置探测**，
+   同时保留可注入核心里的二次探测语义（`git_works`）。
+4. 原文示例把 `nothing to commit` 判断挂在 stderr → Windows 上该提示**走 stdout**，
+   改为 `or_else` 里对合并错误串匹配（`run()` 在 stderr 为空时回落 stdout）。
+5. 原文验收清单要求 `src-tauri/src/git.rs` 含 `is_git_available` 等 → 全部满足，
+   另补充身份兜底与 `.gitignore` 集成两项原文未覆盖的关键行为。
 
 ### 执行步骤
 
@@ -1509,13 +1538,13 @@ pub fn is_git_available() -> bool {
 ### ✅ 验收检查清单
 
 ```
-[ ] src-tauri/src/git.rs 存在
-[ ] 使用了 chrono::Local 生成时间戳，代码中没有 shell date 相关调用
-[ ] cargo build 编译通过
-[ ] 手动测试：在 ~/.ai-profile/ 中有变更时，commit_sync() 执行后 git log 能看到新提交
-[ ] 手动测试：在 ~/.ai-profile/ 中无变更时，commit_sync() 执行后不报错（nothing to commit 静默）
-[ ] 手动测试：将 git 从 PATH 中移除，commit_sync() 返回 Ok(())（不 panic，不报错）
-[ ] git log 中的 commit message 格式为 "sync: 2026-09-14T19:00:00+0800"（ISO-8601）
+[x] src-tauri/src/git.rs 存在
+[x] 使用了 chrono::Local 生成时间戳，代码中没有 shell date 相关调用
+[x] cargo build 编译通过
+[x] 手动测试：在 ~/.ai-profile/ 中有变更时，commit_sync() 执行后 git log 能看到新提交（真机实跑：sync: 2026-09-15T14:35:40+0800）
+[x] 手动测试：在 ~/.ai-profile/ 中无变更时，commit_sync() 执行后不报错（nothing to commit 静默；真机二次同步提交数不变）
+[x] 手动测试：将 git 从 PATH 中移除，commit_sync() 返回 Ok(())（单测 missing_git_degrades_to_ok 注入假程序名覆盖）
+[x] git log 中的 commit message 格式为 "sync: 2026-09-14T19:00:00+0800"（ISO-8601）
 ```
 
 ---

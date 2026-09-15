@@ -64,6 +64,8 @@ export interface SyncReport {
   ok: boolean;
   /** 同步开始前即中止的原因（有值时 tools 必为空） */
   error: string | null;
+  /** 本地版本历史（git 提交）失败的非阻塞提示；同步成功时才可能出现 */
+  historyNote: string | null;
 }
 
 /**

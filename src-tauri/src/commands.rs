@@ -136,6 +136,7 @@ pub async fn run_sync(app: AppHandle) -> SyncReport {
             skill_count: 0,
             ok: false,
             error: Some("同步过程意外中断，请重试。".to_string()),
+            history_note: None,
         },
     };
 

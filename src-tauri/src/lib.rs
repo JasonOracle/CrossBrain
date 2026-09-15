@@ -1,5 +1,6 @@
 pub mod adapters;
 pub mod commands;
+mod git;
 mod init;
 // `pub` 供 examples/ 下的干跑工具定位真实目录（它需要算出 home 来构造副本）
 pub mod paths;
