@@ -93,3 +93,17 @@ pub fn claude_dir() -> PathBuf {
 pub fn codex_dir() -> PathBuf {
     home_dir().join(".codex")
 }
+
+/// 获取 `~/.config/opencode/`（OpenCode 的全局配置根目录）。
+///
+/// # 目录内部结构（2026-09-15 二进制取证 + 探针实测，见 `SPIKE_RESULTS.md`）
+///
+/// - `AGENTS.md` —— L0 落点（单文件型，OpenCode 全局指令；⚠️ **硬链接组成员**，
+///   与 `~/.ai-memory/user_profile.md` 等 3 个文件同一 inode，写入必须走断链三步法）
+/// - `skills/` —— L2 落点（`skills/{name}/SKILL.md`；`skill/` 单数形式同样被扫描）
+/// - `opencode.jsonc` —— OpenCode 主配置，**绝不能碰**
+/// - `node_modules/`、`bun.lock`、`package.json`、`.gitignore` —— OpenCode 内部
+///   插件运行时数据，**绝不能碰**
+pub fn opencode_dir() -> PathBuf {
+    home_dir().join(".config").join("opencode")
+}

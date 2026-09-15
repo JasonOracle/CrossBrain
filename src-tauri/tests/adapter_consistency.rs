@@ -17,7 +17,8 @@
 //!
 //! # 参与对比的 Adapter
 //!
-//! Antigravity IDE / Claude Code / Codex（Codex 于 TASK-18 增补）。
+//! Antigravity IDE / Claude Code / Codex / OpenCode（Codex 于 TASK-18 增补、
+//! OpenCode 于 TASK-22 增补）。
 //! 新增 Adapter 时**必须**加进本文件的对比列表——只加单元测试不算数，
 //! 「我这份对」推不出「彼此一致」。
 
@@ -28,6 +29,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use crossbrain_lib::adapters::antigravity::AntigravityAdapter;
 use crossbrain_lib::adapters::claude_code::ClaudeCodeAdapter;
 use crossbrain_lib::adapters::codex::CodexAdapter;
+use crossbrain_lib::adapters::opencode::OpenCodeAdapter;
 use crossbrain_lib::adapters::{Adapter, CleanupReport};
 
 // ============================================================================
@@ -118,16 +120,20 @@ fn assert_identical_cleanup(
     //   Antigravity: <base>/skills  ← 生产上是 ~/.gemini/config/skills
     //   Claude Code: <base>/skills  ← 生产上是 ~/.claude/skills
     //   Codex:   <base>/skills  ← 生产上是 ~/.codex/skills
+    //   OpenCode: <base>/skills ← 生产上是 ~/.config/opencode/skills
     let gemini_base = root.join(format!("{tag}-gemini"));
     let claude_base = root.join(format!("{tag}-claude"));
     let codex_base = root.join(format!("{tag}-codex"));
+    let opencode_base = root.join(format!("{tag}-opencode"));
     let gemini_skills = gemini_base.join("skills");
     let claude_skills = claude_base.join("skills");
     let codex_skills = codex_base.join("skills");
+    let opencode_skills = opencode_base.join("skills");
 
     make_tree(&gemini_skills, entries);
     make_tree(&claude_skills, entries);
     make_tree(&codex_skills, entries);
+    make_tree(&opencode_skills, entries);
 
     let active_owned: Vec<String> = active.iter().map(|s| (*s).to_string()).collect();
 
@@ -140,6 +146,9 @@ fn assert_identical_cleanup(
     let from_codex = CodexAdapter::with_base_dir(&codex_base)
         .cleanup_orphans(&active_owned)
         .expect("Codex 清理应成功");
+    let from_opencode = OpenCodeAdapter::with_base_dir(&opencode_base)
+        .cleanup_orphans(&active_owned)
+        .expect("OpenCode 清理应成功");
 
     assert_eq!(
         from_antigravity, from_claude,
@@ -150,6 +159,10 @@ fn assert_identical_cleanup(
         "[{tag}] Codex 与 Antigravity 的清理报告不一致"
     );
     assert_eq!(
+        from_antigravity, from_opencode,
+        "[{tag}] OpenCode 与 Antigravity 的清理报告不一致"
+    );
+    assert_eq!(
         list_sorted(&gemini_skills),
         list_sorted(&claude_skills),
         "[{tag}] Antigravity 与 Claude Code 清理后的目录树不一致"
@@ -158,6 +171,11 @@ fn assert_identical_cleanup(
         list_sorted(&gemini_skills),
         list_sorted(&codex_skills),
         "[{tag}] Codex 与 Antigravity 清理后的目录树不一致"
+    );
+    assert_eq!(
+        list_sorted(&gemini_skills),
+        list_sorted(&opencode_skills),
+        "[{tag}] OpenCode 与 Antigravity 清理后的目录树不一致"
     );
 
     from_antigravity
@@ -347,6 +365,7 @@ fn t8_trait_objects_share_identical_behaviour() {
     let gemini_base = root.path().join("traitobj-gemini");
     let claude_base = root.path().join("traitobj-claude");
     let codex_base = root.path().join("traitobj-codex");
+    let opencode_base = root.path().join("traitobj-opencode");
     let entries = [
         "d:crossbrain-keep-111111",
         "d:crossbrain-gone-222222",
@@ -355,12 +374,14 @@ fn t8_trait_objects_share_identical_behaviour() {
     make_tree(&gemini_base.join("skills"), &entries);
     make_tree(&claude_base.join("skills"), &entries);
     make_tree(&codex_base.join("skills"), &entries);
+    make_tree(&opencode_base.join("skills"), &entries);
 
     // 上层同步流程持有的就是这个形态
     let adapters: Vec<Box<dyn Adapter>> = vec![
         Box::new(AntigravityAdapter::with_base_dir(&gemini_base)),
         Box::new(ClaudeCodeAdapter::with_base_dir(&claude_base)),
         Box::new(CodexAdapter::with_base_dir(&codex_base)),
+        Box::new(OpenCodeAdapter::with_base_dir(&opencode_base)),
     ];
 
     let active = vec!["crossbrain-keep-111111".to_string()];
@@ -370,7 +391,7 @@ fn t8_trait_objects_share_identical_behaviour() {
         .collect();
 
     // 遍历而非硬编码索引：日后新增 Adapter 时这条断言会提醒把它加进来
-    assert_eq!(reports.len(), 3, "对比列表应覆盖全部 Adapter");
+    assert_eq!(reports.len(), 4, "对比列表应覆盖全部 Adapter");
     for (i, report) in reports.iter().enumerate().skip(1) {
         assert_eq!(
             &reports[0], report,

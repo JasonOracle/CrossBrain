@@ -3044,3 +3044,52 @@ cd .. && pnpm build         # vue-tsc --noEmit + vite build 零报错
   硬链接组 links=4）。
 - 遗留：保存→自动同步的**真实触发路径**未在真机点击（会写用户文件），
   由单测 + 干跑 + 契约断言覆盖；用户首次使用时即是一次真机验收。
+
+---
+
+## TASK-22：OpenCode Adapter 接入（2026-09-15 增补）
+
+> **增补任务**。触发：用户从「工具接入」弹窗登记的意愿清单中拍板 OpenCode 为
+> 下一个接入对象（Cursor 次之）。Spike 已实测完成（见 `SPIKE_RESULTS.md` TASK-22 节），
+> 落点确认后才动代码。
+
+### 落点（2026-09-15 实证）
+
+| 用途 | 路径 |
+|:---|:---|
+| 安装检测 | `~/.config/opencode/` |
+| L0 全局规则 | `~/.config/opencode/AGENTS.md` —— **标记块协议 + 内联规则全文**（与 Codex 同形态）；⚠️ **硬链接组成员（links=4）**，首注断链走 ADR-15 闸门 |
+| L2 技能知识 | `~/.config/opencode/skills/{slug-hash}/SKILL.md` |
+| 孤儿清理 | `skills/` 下的 `crossbrain-*` 目录 |
+| 备份 | `~/.config/opencode/AGENTS.md.crossbrain-backup` |
+
+### ✅ 实施记录（2026-09-15 15:17 完成）
+
+- 新建 `src-tauri/src/adapters/opencode.rs`（形态三：单文件 + 内联全文，共享层全部复用；
+  **无** `AGENTS.override.md` 式遮蔽机制，不做 override 拦截——二进制取证确认）。
+- 注册四处：`adapters/mod.rs`、`paths.rs`（`opencode_dir()`）、`sync.rs`
+  （`build_tools()` + `ADAPTED_TOOL_IDS` 扩到 4 + `SCAN_CATALOG` opencode `adapted: true`）、
+  `tests/adapter_consistency.rs`（三向对比 → 四向）。
+- 干跑 `dryrun_sync.rs`：新增 OpenCode 副本目录 / 工具清单 / 落盘断言（内联全文 +
+  标记块体内非 @ 引用）/ 检测数 4 / 备份列表 3 / 卸载覆盖 4。
+- 前端零改动：扫描弹窗与同步流程全由后端数据驱动，`UPCOMING_TOOLS` 本就不含 OpenCode。
+
+**验证**：cargo test **167 passed / 0 failed**（lib 146 = 原 126 + opencode 20 单测；
+一致性 7、契约 14）；`dryrun_sync` **0 项未通过**（快照 2951 项前后零改动）；
+真实数据回归：硬链接组 4 个文件 links=4、md5 全等 `47645f60…`，rules.md
+`f0b10675…` 不变，真实目录无新增备份/残留。
+
+### ⚠️ 实施修正（原文/预期 → 为何错 → 改成什么）
+
+1. **预探测记录说「无 skills/ 目录」→ 实测 OpenCode 支持技能**：v1.18.30 内置
+   技能系统（glob `{skill,skills}/**/SKILL.md`），探针实证 `~/.config/opencode/skills/`
+   会被扫描。技能落点按 `skills/`（复数，与 Codex 一致）。
+2. **「@ 引用未混入」断言不能查整份文件**：用户记忆中心原文里本就有
+   `@~/.ai-profile/AGENTS.md` 字样（用户自己写的说明文字），整文件断言必然假失败。
+   改为**只查标记块体内**是否为内联全文。
+3. **「写独立文件 / @ 引用」两种形态都不可照搬**：二进制运行时代码显示 OpenCode
+   只认 `config/AGENTS.md` 一个全局文件，且它加载 `~/.claude/CLAUDE.md` 时
+   `@` 引用**不展开**——内联全文是唯一正确形态。
+4. **`~/.agents/skills/` 与 `~/.claude/skills/` 也是 OpenCode 的扫描根**：
+   我们仍只写自己的根（写入边界铁律）；「OpenCode 会看到重复技能」是宿主去重问题，
+   不构成改写入范围的理由。

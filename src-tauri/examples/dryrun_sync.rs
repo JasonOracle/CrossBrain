@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use crossbrain_lib::adapters::antigravity::AntigravityAdapter;
 use crossbrain_lib::adapters::claude_code::ClaudeCodeAdapter;
 use crossbrain_lib::adapters::codex::CodexAdapter;
+use crossbrain_lib::adapters::opencode::OpenCodeAdapter;
 use crossbrain_lib::adapters::{MARKER_END, MARKER_START};
 use crossbrain_lib::slug;
 use crossbrain_lib::sync::{scan_knowledge, KnowledgeItem, ToolDescriptor, ToolSyncStatus};
@@ -58,6 +59,8 @@ fn main() {
     let real_claude = home.join(".claude");
     let real_gemini = home.join(".gemini").join("config");
     let real_codex = home.join(".codex");
+    // OpenCode（TASK-22 增补）——它的 AGENTS.md 是「全局记忆中心」硬链接组成员
+    let real_opencode = home.join(".config").join("opencode");
 
     // ⚠️ 只快照我们真正会写的那些位置。
     // 整个 ~/.claude/ 可能包含大量缓存与插件，全量哈希既慢又无意义。
@@ -76,6 +79,11 @@ fn main() {
         real_codex.join("AGENTS.md.crossbrain-backup"),
         real_codex.join("AGENTS.md.crossbrain-before-restore"),
         real_codex.join("skills"),
+        // OpenCode（TASK-22 增补）——同 Codex 的三处 + skills 根
+        real_opencode.join("AGENTS.md"),
+        real_opencode.join("AGENTS.md.crossbrain-backup"),
+        real_opencode.join("AGENTS.md.crossbrain-before-restore"),
+        real_opencode.join("skills"),
         // SSOT 侧（TASK-12 增补）：全局规则与知识库目录是用户内容，
         // 任何一次干跑都不许碰它们
         real_profile.join("global").join("rules.md"),
@@ -105,6 +113,13 @@ fn main() {
     // 全量复制既慢又无意义——只复制 CrossBrain 可能触碰的两处。
     if let Err(e) = copy_codex_subset(&real_codex, &fake_codex) {
         println!("   ✗ 复制 ~/.codex 子集失败：{e}");
+        std::process::exit(1);
+    }
+    // OpenCode 与 Codex 同构：只碰 AGENTS.md（+备份）与 skills/。
+    // 注意：真机 AGENTS.md 是硬链接组成员，fs::copy 读内容写普通副本，链接不会被碰。
+    let fake_opencode = tmp.join("opencode");
+    if let Err(e) = copy_codex_subset(&real_opencode, &fake_opencode) {
+        println!("   ✗ 复制 ~/.config/opencode 子集失败：{e}");
         std::process::exit(1);
     }
     let original_claude_md = fs::read_to_string(fake_claude.join("CLAUDE.md")).unwrap_or_default();
@@ -138,6 +153,7 @@ fn main() {
         ("Claude Code", fake_claude.join("skills")),
         ("Antigravity", fake_gemini.join("skills")),
         ("Codex", fake_codex.join("skills")),
+        ("OpenCode", fake_opencode.join("skills")),
     ];
     let user_entries_before: Vec<Vec<String>> = skills_targets
         .iter()
@@ -171,6 +187,12 @@ fn main() {
             display_name: "Codex",
             push_path: fake_codex.clone(),
             adapter: Box::new(CodexAdapter::with_base_dir(fake_codex.clone())),
+        },
+        ToolDescriptor {
+            tool_id: "opencode",
+            display_name: "OpenCode",
+            push_path: fake_opencode.clone(),
+            adapter: Box::new(OpenCodeAdapter::with_base_dir(fake_opencode.clone())),
         },
     ];
 
@@ -215,15 +237,15 @@ fn main() {
         &format!("技能条数正确（{}）", knowledge.len()),
     );
     c.check(
-        events.len() == 3,
-        &format!("进度事件逐个工具推送（收到 {} 条，期望 3 条）", events.len()),
+        events.len() == 4,
+        &format!("进度事件逐个工具推送（收到 {} 条，期望 4 条）", events.len()),
     );
     c.check(
         report
             .tools
             .iter()
             .all(|t| t.status == ToolSyncStatus::Ok),
-        "三个工具均为成功",
+        "四个工具均为成功",
     );
 
     // ── 副本内的实际落盘效果 ──
@@ -288,10 +310,34 @@ fn main() {
         println!("   · 真实 ~/.codex/skills/.system/ 不存在，跳过该项");
     }
 
+    // OpenCode：与 Codex 同为「标记块注入 + 内联规则全文」（TASK-22）。
+    // 若这里退化成 @ 引用（或写成独立文件），同步会静默失效。
+    let opencode_agents = fs::read_to_string(fake_opencode.join("AGENTS.md")).unwrap_or_default();
+    c.check(
+        opencode_agents.contains("<!-- CrossBrain:Start -->"),
+        "OpenCode AGENTS.md 已注入标记块",
+    );
+    c.check(
+        opencode_agents.contains("我的编码偏好"),
+        "OpenCode 标记块内联了规则全文（OpenCode 不认识 @ 语法）",
+    );
+    // 只检查**标记块体内**：用户自己的记忆中心原文里本就可能出现 `@~` 字样
+    //（真机实测就有），那是用户内容，不是我们的注入。
+    let opencode_block = opencode_agents
+        .split("<!-- CrossBrain:Start -->")
+        .nth(1)
+        .and_then(|rest| rest.split("<!-- CrossBrain:End -->").next())
+        .unwrap_or("");
+    c.check(
+        opencode_block.contains("我的编码偏好") && !opencode_block.trim().starts_with("@~"),
+        "OpenCode 标记块体内是内联全文而非 Claude 式 @ 引用",
+    );
+
     for (label, dir) in [
         ("Claude Code", fake_claude.join("skills")),
         ("Antigravity", fake_gemini.join("skills")),
         ("Codex", fake_codex.join("skills")),
+        ("OpenCode", fake_opencode.join("skills")),
     ] {
         let injected = crossbrain_dirs(&dir);
         c.check(
@@ -373,14 +419,20 @@ fn main() {
         );
     }
     c.check(
-        detected.len() == 3,
-        &format!("检测工具数为 3（实际 {} 个）", detected.len()),
+        detected.len() == 4,
+        &format!("检测工具数为 4（实际 {} 个）", detected.len()),
     );
     c.check(
         detected
             .iter()
             .any(|t| t.tool_id == "codex" && t.installed),
         "Codex 在检测清单中且标记为已安装",
+    );
+    c.check(
+        detected
+            .iter()
+            .any(|t| t.tool_id == "opencode" && t.installed),
+        "OpenCode 在检测清单中且标记为已安装",
     );
 
     // ── AGENTS.override.md 遮蔽 → 必须作为「失败」上报，而不是被编排层吞掉 ──
@@ -442,12 +494,20 @@ fn main() {
         );
     }
     c.check(
-        backups.len() == 2,
+        backups.len() == 3,
         &format!("只列出有备份概念的工具（实际 {} 个）", backups.len()),
     );
     c.check(
         !backups.iter().any(|b| b.tool_id == "antigravity"),
         "写独立文件的工具不该出现在备份列表里（它从不改动用户既有文件）",
+    );
+    c.check(
+        backups
+            .iter()
+            .find(|b| b.tool_id == "opencode")
+            .map(|b| b.exists)
+            .unwrap_or(false),
+        "OpenCode 副本里应已有备份（首注 AGENTS.md 时创建）",
     );
     c.check(
         backups
@@ -660,6 +720,12 @@ fn main() {
                 push_path: fake_codex.clone(),
                 adapter: Box::new(CodexAdapter::with_base_dir(fake_codex.clone())),
             },
+            ToolDescriptor {
+                tool_id: "opencode",
+                display_name: "OpenCode",
+                push_path: fake_opencode.clone(),
+                adapter: Box::new(OpenCodeAdapter::with_base_dir(fake_opencode.clone())),
+            },
         ];
 
         // 卸载前把「标记块外的用户内容」摘出来作为期望值（不依赖正则，纯字符串定位）
@@ -677,6 +743,8 @@ fn main() {
 
         let claude_before = fs::read_to_string(fake_claude.join("CLAUDE.md")).unwrap_or_default();
         let codex_before = fs::read_to_string(fake_codex.join("AGENTS.md")).unwrap_or_default();
+        let opencode_before =
+            fs::read_to_string(fake_opencode.join("AGENTS.md")).unwrap_or_default();
 
         // 期望值与实现同构、且对前置状态自适应：
         // - 无标记块 → 文件原样不动（前面 [10] 的还原可能已把块移除）
@@ -695,10 +763,11 @@ fn main() {
         }
         let expected_claude = expected_after_uninstall(&claude_before);
         let expected_codex = expected_after_uninstall(&codex_before);
+        let expected_opencode = expected_after_uninstall(&opencode_before);
 
         match sync::uninstall_all_for(&mut uninstall_tools) {
             Ok(outcomes) => {
-                c.check(outcomes.len() == 3, "卸载应覆盖全部 3 个工具");
+                c.check(outcomes.len() == 4, "卸载应覆盖全部 4 个工具");
                 for outcome in &outcomes {
                     println!(
                         "      {}：{}",
@@ -740,17 +809,30 @@ fn main() {
             "Codex 备份文件必须被删除（去痕）",
         );
 
+        // OpenCode：同 Codex（标记块注入型）
+        let opencode_after =
+            fs::read_to_string(fake_opencode.join("AGENTS.md")).unwrap_or_default();
+        c.check(
+            !opencode_after.contains(MARKER_START) && opencode_after == expected_opencode,
+            "OpenCode AGENTS.md 移除标记块后回到用户原文",
+        );
+        c.check(
+            !fake_opencode.join("AGENTS.md.crossbrain-backup").exists(),
+            "OpenCode 备份文件必须被删除（去痕）",
+        );
+
         // Antigravity：独立规则文件消失
         c.check(
             !fake_gemini.join("rules").join("crossbrain-L0.md").exists(),
             "Antigravity 的独立规则文件必须被删除",
         );
 
-        // 三个 skills 目录都不得残留 crossbrain-* 目录
+        // 各 skills 目录都不得残留 crossbrain-* 目录
         for (name, dir) in [
             ("Claude", fake_claude.join("skills")),
             ("Antigravity", fake_gemini.join("skills")),
             ("Codex", fake_codex.join("skills")),
+            ("OpenCode", fake_opencode.join("skills")),
         ] {
             let leftovers = crossbrain_dirs(&dir).len();
             c.check(

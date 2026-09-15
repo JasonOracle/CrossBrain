@@ -57,7 +57,7 @@
 
 | 工具 | 预估机制 | 预探测落点（2026-09-14） | 状态 |
 |:---|:---|:---|:---|
-| **OpenCode IDE** | 标准 AGENTS.md 体系 | `~/.config/opencode/AGENTS.md`（无 `skills/` 目录） | 待 Spike |
+| **OpenCode IDE** | 标准 AGENTS.md 体系 | `~/.config/opencode/AGENTS.md`（**2026-09-15 Spike 完成，已提前接入 V1**——技能根 `~/.config/opencode/skills/` 实证存在） | ✅ 已接入（TASK-22） |
 | **CodeBuddy** | `.mdc` 规则文件体系 | `~/.codebuddy/rules/*.mdc`（已有用户自建文件）+ `skills/` | 待 Spike |
 | **WorkBuddy** | 探测全局配置路径 | `~/.workbuddy/MEMORY.md` + `skills/`（**无 rules 目录**） | 待 Spike |
 | **Trae**（字节跳动） | VS Code 架构，探测全局 rules 目录 | 本机未安装 | 待 Spike |
@@ -228,7 +228,7 @@
 ## 10. V2 / V3 演进路标（参考）
 
 ### V1.5（V1 上线后立即启动）
-- OpenCode / CodeBuddy / WorkBuddy / Trae Adapter 接入（Codex 已于 V1 增补完成，见 TASK-18）
+- CodeBuddy / WorkBuddy / Trae Adapter 接入（Codex 已于 V1 增补完成见 TASK-18，OpenCode 已于 V1 增补完成见 TASK-22）
 - 导出配置包（完整迁移包 + 纯规则包双选）
 - UI 优化：本地版本历史时间轴查看与回滚
 

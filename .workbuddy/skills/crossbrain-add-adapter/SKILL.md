@@ -2,7 +2,7 @@
 name: crossbrain-add-adapter
 description: 为 CrossBrain（D:\project\memory1.0）接入一个新的 AI 工具 Adapter，把支持的工具数从 N 提到 N+1。当用户说「接入 X 工具 / 让向导识别 X / 加一个 X adapter / TASK-NN 是接 X」时使用。
 description_zh: "CrossBrain 新增 AI 工具 Adapter 的完整流程：从落点探测到文档同步与安全回归"
-version: 1.5.0
+version: 1.6.0
 agent_created: true
 allowed-tools: Read,Edit,Write,Grep,Glob,Bash,PowerShell
 display_name: "CrossBrain 接入新工具 Adapter"
@@ -322,6 +322,18 @@ for f in ~/.ai-memory/user_profile.md ~/.cursor/rules/user_profile.md \
    （含精确时间戳，用 `date +"%Y-%m-%d %H:%M:%S"` 取，**不要自己算**）
 
 外加 `.workbuddy/memory/YYYY-MM-DD.md` 追加记录、必要时更新 `MEMORY.md`。
+
+---
+
+## 7.5 已接入工具的特有机理速查（TASK-18/22 沉淀）
+
+| 工具 | 形态 | 关键机理（别踩） |
+|:---|:---|:---|
+| Codex | 单文件+内联 | `AGENTS.override.md` 遮蔽 → 同步前硬拦截；`skills/.system/` 内置；App/CLI/扩展共用 `~/.codex/`；`codex debug prompt-input` 一条命令验 L0+L2 |
+| OpenCode | 单文件+内联 | **无遮蔽机制**（不做 override 拦截）；技能根 `skills/`（`skill/` 单数也认），**还全局扫 `~/.agents/skills/` 与 `~/.claude/skills/`**；原样加载 `~/.claude/CLAUDE.md`（`@` 不展开）；L0 落点是硬链接组成员（links=4，首注断链走 ADR-15 闸门）；`description` 缺失被过滤；`opencode debug skill` 免费验技能根 |
+
+二进制取证实操提示：180 MB 级 exe 的 `grep -a -o` **必须加 `-m N` 限流**，否则会被
+沙箱 SIGTERM；Windows 下大写命令行参数照常。
 
 ---
 

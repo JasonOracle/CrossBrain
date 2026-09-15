@@ -249,13 +249,54 @@
 
 ---
 
+## ✅ TASK-22 Spike（OpenCode — 实测完成，2026-09-15 15:00）
+
+**工具版本**：OpenCode CLI v1.18.30（npm 包 `opencode-ai`，真实二进制
+`node_modules/opencode-ai/bin/opencode.exe`，180 MB）。
+
+### 三项必答
+
+| 验证项 | 结论 | 证据 |
+|:---|:---|:---|
+| ① L0 落点能被读到 | **是**——`~/.config/opencode/AGENTS.md` | **二进制取证**（`grep -a` 运行时代码）：全局指令数组 = `[join(config,"AGENTS.md"), ...join(home,".claude","CLAUDE.md")]`（`disableClaudeCodePrompt` 关闭才跳过后者） |
+| ② skills 按 description 懒加载 | **是**——技能根 `~/.config/opencode/skills/{name}/SKILL.md`（`skill/` 单数同样被扫）；`description` 缺失会被**过滤**（二进制内文档串原话） | **无头探针实证**：向 skills 根写 `crossbrain-spike-test` 探针 → 中立目录 `/tmp/cbspike` 跑 `opencode debug skill` → 清单列出探针且含 description → 删除探针复跑 → 0 残留 |
+| ③ 作用域 | **全局可用**（home 级目录从项目外的 cwd 照常被扫描） | 同上（探针在 `~/.config/opencode/skills/`，cwd 在 `%TEMP%`） |
+
+### OpenCode 特有机理（接入与后续接入都要记住）
+
+1. **多技能根**：OpenCode 除自身根外还全局扫描 `~/.agents/skills/`（本机 86 个）与
+   `~/.claude/skills/`（Claude 兼容，连 `node_modules` 深处的 SKILL.md 都扫到了）。
+   CrossBrain **只写自己的根** `~/.config/opencode/skills/`；同名技能在模型视图中的
+   去重是宿主行为，不由我们干预。
+2. **`~/.claude/CLAUDE.md` 被原样加载**：Claude 标记块里的 `@~/.ai-profile/AGENTS.md`
+   对 OpenCode 只是一行普通文本（`@` 展开是 Claude Code 专有）→ 内联全文必须写
+   OpenCode 自己的 AGENTS.md。
+3. **无遮蔽文件机制**：二进制取证未见 `AGENTS.override.md` 式覆盖（与 Codex 不同），
+   不需要 `reject_if_override_present`；用户在 `opencode.jsonc` 配 `instructions`
+   属用户自主行为，不视为遮蔽。
+4. **⚠️ L0 落点是硬链接组成员（links=4）**：与 `~/.ai-memory/user_profile.md`、
+   `~/.cursor/rules/user_profile.md`、`~/.gemini/config/rules/user_global.md` 同一
+   inode——用户手工维护的「全局记忆中心」。首次注入标记块会**断链**（其余 3 个
+   链接内容不变），ADR-15 闸门 + `.crossbrain-backup` 兜底。干跑实证：副本注入后
+   兄弟路径内容零变化。
+5. **`opencode debug skill` / `debug config` 是免费无头验证口**：后续回归可直接复用
+   （等价 Codex 的 `debug prompt-input` 之于技能清单的那一半）。
+
+### 遗留
+
+- **L0「真模型读到」验证未做**（需要 `opencode run` 真开会话，消耗用户 API 额度；
+  且往真实 AGENTS.md 写探针 = 改硬链接组，风险不成比例）。二进制运行时代码取证
+  已是强证据；真模型验证随用户首次在 UI 里启用 OpenCode 同步时自然完成。
+
+---
+
 ## V1.5 待 Spike 项目
 
 以下 Spike 在 V1 上线后立即启动（本机路径已由上一节预探测确认）：
 
 | 优先级 | 工具 | 验证项 | 目标路径 |
 |:---|:---|:---|:---|
-| P0 | **OpenCode** | 写入 `AGENTS.md` 后是否被读取；确认技能落点 | `~/.config/opencode/AGENTS.md` |
+| ~~P0~~ | ~~**OpenCode**~~ | ✅ **已完成接入（TASK-22，2026-09-15）**，见上节 | `~/.config/opencode/AGENTS.md` |
 | P1 | **CodeBuddy** | `.mdc` 规范确认 + 追加而非覆盖的可行性 | `~/.codebuddy/rules/` |
 | P1 | **WorkBuddy** | 全局规则注入点确认（勿与项目级 `.workbuddy/` 混淆） | `~/.workbuddy/MEMORY.md` |
 | P2 | **Trae**（字节跳动） | 全局 rules 目录路径确认 + 懒加载验证 | 本机未安装，需用户侧安装后再探 |

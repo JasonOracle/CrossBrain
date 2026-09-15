@@ -28,6 +28,7 @@ use regex::{NoExpand, Regex};
 pub mod antigravity;
 pub mod claude_code;
 pub mod codex;
+pub mod opencode;
 
 /// 孤儿清理报告。
 ///

@@ -15,20 +15,26 @@
 - 路径走 `crate::paths`；时间戳走 `chrono`；写用户既有文件走 `write_breaking_hardlink()`（**无例外**）。
 - `Adapter` 约束 `Send + Sync`；Mock 用 `AtomicU32`（`Cell` 非 Sync）。
 
-## 三个 Adapter 的 L0 形态（接新工具前必读）
+## 四个 Adapter 的 L0 形态（接新工具前必读）
 
 | Adapter | L0 落点 | 写入方式 |
 |:---|:---|:---|
 | Antigravity | `~/.gemini/config/rules/`（整目录被读） | 独立文件 `crossbrain-L0.md` |
 | Claude Code | `~/.claude/CLAUDE.md` 单文件 | 标记块内 `@~/.ai-profile/AGENTS.md` **引用** |
 | Codex | `~/.codex/AGENTS.md` 单文件 | 标记块内规则**全文内联** |
+| OpenCode | `~/.config/opencode/AGENTS.md` 单文件 | 标记块内规则**全文内联**（⚠️ 硬链接组成员，首注断链走 ADR-15 闸门） |
 
 - **两条致命照搬**：给单文件型工具写独立文件→永不被读；给非 Claude 工具用 `@` 引用（`@` 是 Claude 专有）。先判目录型/单文件型。
 - **遮蔽文件**：Codex `AGENTS.override.md` 优先且同级只取第一个非空 → `reject_if_override_present()` 硬拦截。每接新工具反问：有没有优先级更高的文件遮蔽落点？
 - 共享层在 `adapters/mod.rs`（`inject_marker_block` 四情况协议 / `write_breaking_hardlink` / `cleanup_crossbrain_orphans` / `format_skill_md` / `marker_regex()` 由常量拼接；卸载用 `remove_marker_block_from_file` / `delete_backup_files` / `skill_cleanup_actions`）。新 Adapter 只提供差异：目标文件/备份文件/标记块内容；`l0_backup()` 默认 `None`；**`uninstall()` 必须覆盖**（顺序：移块 → 删备份 → 清技能目录，删备份绝不能提前）。
 - 内联用户内容前必须 `ensure_no_marker_in_content()`，放在**构造内容那一层**。
-- 7 步清单见项目技能 `.workbuddy/skills/crossbrain-add-adapter`（v1.3.0）。
-- **Spike 优先用工具自带 dump 命令**（如 `codex debug prompt-input` 一次验 L0+L2）；须在**项目外**中立目录跑；没有 dump 才退回人工探针（用后清理+复跑回归）；文档说不清就二进制取证 `grep -a -o -E '.{0,140}AGENTS\.md.{0,140}' <tool>.exe`。
+- **「未混入 @ 引用」类断言只查标记块体内**：用户记忆中心原文里本就有
+  `@~/.ai-profile/AGENTS.md` 字样（用户自己写的），整文件断言假失败（TASK-22 实测）。
+- 7 步清单见项目技能 `.workbuddy/skills/crossbrain-add-adapter`（v1.6.0）。
+- **Spike 优先用工具自带 dump/列表命令**（如 `codex debug prompt-input` 一次验 L0+L2、
+  `opencode debug skill` 验技能根）；须在**项目外**中立目录跑；没有 dump 才退回人工探针
+  （用后清理+复跑回归）；文档说不清就二进制取证 `grep -a -o -E '.{0,140}AGENTS\.md.{0,140}' <tool>.exe`
+  （OpenCode 的全局指令数组就是这么挖出来的；大 exe 的 grep 加 `-m` 限流防被杀）。
 
 ## IPC 层
 

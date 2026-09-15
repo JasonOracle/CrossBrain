@@ -54,6 +54,7 @@ use crate::adapters::{format_skill_md, Adapter, AdapterError};
 use crate::adapters::antigravity::AntigravityAdapter;
 use crate::adapters::claude_code::ClaudeCodeAdapter;
 use crate::adapters::codex::CodexAdapter;
+use crate::adapters::opencode::OpenCodeAdapter;
 use crate::paths;
 use crate::slug;
 
@@ -201,6 +202,15 @@ fn build_tools() -> Vec<ToolDescriptor> {
             display_name: "Codex",
             push_path: paths::codex_dir(),
             adapter: Box::new(CodexAdapter::new()),
+        },
+        // OpenCode 是 2026-09-15 的增补支持（TASK-22，Spike 实测后接入）。
+        // L0 形态与 Codex 相同（单文件 + 内联全文），但落点是硬链接组成员——
+        // 首次注入会断链（用户已通过 ADR-15 闸门知情），详见 `adapters/opencode.rs`。
+        ToolDescriptor {
+            tool_id: "opencode",
+            display_name: "OpenCode",
+            push_path: paths::opencode_dir(),
+            adapter: Box::new(OpenCodeAdapter::new()),
         },
     ]
 }
@@ -488,7 +498,7 @@ fn format_local_time(time: std::time::SystemTime) -> String {
 // ============================================================================
 
 /// 已适配工具的稳定 id 清单（顺序即 UI 展示顺序）。
-pub const ADAPTED_TOOL_IDS: [&str; 3] = ["claude_code", "antigravity", "codex"];
+pub const ADAPTED_TOOL_IDS: [&str; 4] = ["claude_code", "antigravity", "codex", "opencode"];
 
 /// 扫描目录的一个条目：本机可能安装的编程工具 + 它的 home 相对特征路径。
 struct ScanEntry {
@@ -502,7 +512,7 @@ struct ScanEntry {
 
 /// 扫描目录清单。
 ///
-/// 前三项是已适配工具；其余是 2026-09-14 Spike 预探测过的工具
+/// 前 4 项是已适配工具；其余是 2026-09-14 Spike 预探测过的工具
 /// （`docs/testing/SPIKE_RESULTS.md`）：能发现安装痕迹，但落点形态未经验证，
 /// 按铁律「接入必先探针验证」**不得直接写入**——勾选它们只做意愿记录
 /// （存进状态文件），作为后续适配的优先级依据。探测是纯只读的。
@@ -510,7 +520,7 @@ const SCAN_CATALOG: [ScanEntry; 10] = [
     ScanEntry { id: "claude_code", name: "Claude Code", detect_rel: ".claude", adapted: true },
     ScanEntry { id: "antigravity", name: "Antigravity IDE", detect_rel: ".gemini", adapted: true },
     ScanEntry { id: "codex", name: "Codex", detect_rel: ".codex", adapted: true },
-    ScanEntry { id: "opencode", name: "OpenCode", detect_rel: ".config/opencode", adapted: false },
+    ScanEntry { id: "opencode", name: "OpenCode", detect_rel: ".config/opencode", adapted: true },
     ScanEntry { id: "codebuddy", name: "CodeBuddy", detect_rel: ".codebuddy", adapted: false },
     ScanEntry { id: "workbuddy", name: "WorkBuddy", detect_rel: ".workbuddy", adapted: false },
     ScanEntry { id: "cursor", name: "Cursor", detect_rel: ".cursor", adapted: false },
@@ -1365,8 +1375,8 @@ mod tests {
         fs::create_dir_all(tmp.0.join(".claude")).unwrap();
         fs::create_dir_all(tmp.0.join(".cursor")).unwrap();
 
-        // None = 用户从未做过选择 → 已适配的三个按「默认接入」显示为已选
-        //（与真实同步行为一致——没选过就是三个全跑）
+        // None = 用户从未做过选择 → 已适配的四个按「默认接入」显示为已选
+        //（与真实同步行为一致——没选过就是四个全跑）
         let result = scan_installed_tools_in(&tmp.0, None);
 
         let by_id = |id: &str| {
@@ -1376,10 +1386,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("扫描结果缺 {id}"))
         };
 
-        // 目录清单顺序：已适配三件套在最前
+        // 目录清单顺序：已适配四件套在最前
         assert_eq!(result[0].tool_id, "claude_code");
         assert_eq!(result[1].tool_id, "antigravity");
         assert_eq!(result[2].tool_id, "codex");
+        assert_eq!(result[3].tool_id, "opencode");
 
         let claude = by_id("claude_code");
         assert!(claude.installed && claude.adapted && claude.selected);

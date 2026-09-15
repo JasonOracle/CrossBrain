@@ -9,10 +9,10 @@
 
 | 项目 | 状态 |
 |:---|:---|
-| **当前阶段** | 🎉 **第 4 阶段：系统验证与打包 — 全部完成；TASK-09（SSOT 版本化）✅ 补齐**。**TASK-15 ✅（端到端测试）**、**TASK-16 ✅（离线测试）**、**TASK-17 ✅（生产构建）**、**TASK-09 ✅（本地 git 版本历史）**、**TASK-20 ✅ → 已被 TASK-21 取代**、**TASK-21 ✅（工具接入）**——V1 全部任务收官，仅剩 7 个未适配工具按用户意愿排期接入 |
+| **当前阶段** | 🎉 **第 4 阶段：系统验证与打包 — 全部完成；TASK-09（SSOT 版本化）✅、TASK-22（OpenCode 接入）✅ 增补收官**。**TASK-15/16/17 ✅**、**TASK-09 ✅**、**TASK-20 ✅ → 已被 TASK-21 取代**、**TASK-21 ✅（工具接入）**、**TASK-22 ✅（OpenCode）**——支持工具数 **4**（Claude Code / Antigravity IDE / Codex / OpenCode），V1 全部任务收官，剩余未适配工具按用户意愿排期 |
 | **当前日期** | 2026-09-15 |
 | **计划交付** | 2026-09-28（两周） |
-| **下一个任务** | 待用户拍板：从「工具接入」弹窗登记的 7 个未适配工具（opencode / codebuddy / workbuddy / cursor / trae / zcode / qoder）中选下一个接入（每个含 Spike 实测，流程见 `.workbuddy/skills/crossbrain-add-adapter`）<br>✅ `TASK-09` **已于 2026-09-15 14:40 完成**：`~/.ai-profile` 自动 git init + 同步末尾自动提交（`sync: <ISO-8601>`）；未装 git 静默降级、提交失败不影响同步结果；**T7-3/T8-1/T8-3 已回补**；真机实跑验证（建仓提交/幂等/数据零改动）<br>✅ `TASK-17`（增补）**已于 2026-09-15 14:01 完成**：`pnpm tauri build` 零 error；MSI（2.6 MB）+ NSIS setup（1.8 MB）+ 便携 zip（`dist-release/`，2.3 MB）；release exe 独立进程启动实测正常；MSI 双击安装留用户验证<br>✅ `TASK-21`（增补）**已于 2026-09-15 13:05 完成**：设置页「工具接入」——扫描本机 10 类工具（纯只读）→ 复选框勾选（未适配工具登记意愿）→ 保存即按新范围同步；探针 UI 移除；真机走查 11/11 通过<br>✅ `TASK-20`（增补）**已于 2026-09-15 12:01 完成**：设置页「工具读取检测」——写临时探针技能 + Codex 全自动取证（`codex debug prompt-input`）+ 移除/同步/卸载三重清理；真机端到端通过<br>✅ `TASK-16` **已于 2026-09-15 11:24 完成**：T7-1/T7-2 通过（CDP 离线模拟）；T7-3 与 T8-1/T8-3 依赖暂缓的 TASK-09，随其回补<br>✅ `TASK-15` 已于 2026-09-15 11:12 完成：T9-1/T9-2 真机端到端通过（含 Codex `debug prompt-input` 实证技能加载）+ 积压 GUI 走查；**发现并修复 MainView 未加载规则内容的 BUG**；T10 真机确认卸载留用户执行<br>✅ `TASK-14` 已于 2026-09-15 10:30 完成：三工具去痕 + 标记块外内容保留 + 状态文件删除回向导<br>✅ `TASK-13` 已于 2026-09-15 09:58 完成：离线指示红色化 + 失败原因可点击展开 + report.ok 权威判定；git commit 一项顺延 TASK-09<br>✅ `TASK-12` 已于 2026-09-15 09:48 完成：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原 |
+| **下一个任务** | 待用户拍板：剩余未适配工具（codebuddy / workbuddy / cursor / trae / zcode / qoder）中选下一个接入（每个含 Spike 实测，流程见 `.workbuddy/skills/crossbrain-add-adapter`）<br>✅ `TASK-22`（增补）**已于 2026-09-15 15:17 完成**：OpenCode Adapter——二进制取证 + 无头探针实证落点（AGENTS.md 内联全文 + `skills/` 技能根，L0 落点是硬链接组成员首注断链走 ADR-15 闸门）；cargo test 167 passed；干跑 0 未通过；真实数据零改动<br>✅ `TASK-09` **已于 2026-09-15 14:40 完成**：`~/.ai-profile` 自动 git init + 同步末尾自动提交（`sync: <ISO-8601>`）；未装 git 静默降级、提交失败不影响同步结果；**T7-3/T8-1/T8-3 已回补**；真机实跑验证（建仓提交/幂等/数据零改动）<br>✅ `TASK-17`（增补）**已于 2026-09-15 14:01 完成**：`pnpm tauri build` 零 error；MSI（2.6 MB）+ NSIS setup（1.8 MB）+ 便携 zip（`dist-release/`，2.3 MB）；release exe 独立进程启动实测正常；MSI 双击安装留用户验证（**14:52 已重建，含 TASK-09**）<br>✅ `TASK-21`（增补）**已于 2026-09-15 13:05 完成**：设置页「工具接入」——扫描本机 10 类工具（纯只读）→ 复选框勾选（未适配工具登记意愿）→ 保存即按新范围同步；探针 UI 移除；真机走查 11/11 通过<br>✅ `TASK-20`（增补）**已于 2026-09-15 12:01 完成**：设置页「工具读取检测」——写临时探针技能 + Codex 全自动取证（`codex debug prompt-input`）+ 移除/同步/卸载三重清理；真机端到端通过<br>✅ `TASK-16` **已于 2026-09-15 11:24 完成**：T7-1/T7-2 通过（CDP 离线模拟）；T7-3 与 T8-1/T8-3 依赖暂缓的 TASK-09，随其回补<br>✅ `TASK-15` 已于 2026-09-15 11:12 完成：T9-1/T9-2 真机端到端通过（含 Codex `debug prompt-input` 实证技能加载）+ 积压 GUI 走查；**发现并修复 MainView 未加载规则内容的 BUG**；T10 真机确认卸载留用户执行<br>✅ `TASK-14` 已于 2026-09-15 10:30 完成：三工具去痕 + 标记块外内容保留 + 状态文件删除回向导<br>✅ `TASK-13` 已于 2026-09-15 09:58 完成：离线指示红色化 + 失败原因可点击展开 + report.ok 权威判定；git commit 一项顺延 TASK-09<br>✅ `TASK-12` 已于 2026-09-15 09:48 完成：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原 |
 | **环境状态** | ✅ Rust 1.98.1 (MSVC) + VS Build Tools 2022；`~/.ai-profile/` SSOT 底座就绪；**IPC 层已打通，首次运行向导已端到端验证**；**支持工具数 2 → 3**（Claude Code / Antigravity IDE / Codex） |
 
 ---
@@ -171,6 +171,10 @@
   未装 git 静默降级、提交失败不影响同步结果（`historyNote` 非阻塞提示）；
   身份兜底只 `-c` 注入不写配置；T7-3/T8-1/T8-3 已回补（TEST_PLAN）；
   真机实跑验证：建仓提交 / 二次幂等 / rules.md md5 前后一致
+- ✅ **TASK-22**（2026-09-15 15:17，增补）：OpenCode Adapter——Spike（二进制取证 +
+  `opencode debug skill` 无头探针）实证后接入；L0 = AGENTS.md 内联全文
+  （硬链接组成员，首注断链走 ADR-15 闸门）；L2 = `~/.config/opencode/skills/`；
+  支持工具数 3 → 4。L0 真模型验证留用户首次启用时自然完成
 
 ### 增补任务（2026-09-14 用户触发）
 
@@ -336,6 +340,30 @@
 > ```
 
 ---
+
+### 2026-09-15 15:17:00 — WorkBuddy（GLM-5.3-Flash）
+
+- 完成：**TASK-22 OpenCode Adapter 接入**（用户从意愿清单拍板）。Spike：
+  二进制取证（180 MB opencode.exe `grep -a` 读运行时代码）确认全局指令 =
+  `[join(config,"AGENTS.md"), join(home,".claude","CLAUDE.md")]`；
+  `opencode debug skill` 无头探针实证 `~/.config/opencode/skills/` 技能根
+  （探针验证后已清理，0 残留）。实现：形态三（单文件 + 内联全文），
+  `adapters/opencode.rs`（20 单测）+ 四处注册 + 干跑扩展；**前端零改动**。
+- 修改了文件：`adapters/opencode.rs`（新建）、`adapters/mod.rs`、`paths.rs`、
+  `sync.rs`、`tests/adapter_consistency.rs`、`examples/dryrun_sync.rs`、
+  SPIKE_RESULTS.md、TASK_BREAKDOWN.md（TASK-22 节）、PRD.md（工具矩阵）、本文件。
+- 注意事项：
+  1. **L0 落点是硬链接组成员（links=4）**：首次注入会断链（其余 3 链接内容不变），
+     ADR-15 闸门 + 备份兜底；单测 `sync_l0_breaks_hardlink_without_polluting_siblings` 锁定。
+  2. **用户记忆中心原文含 `@~/.ai-profile/AGENTS.md` 字样**——干跑的「未混入 @」
+     断言改为只查标记块体内（整文件断言假失败）。
+  3. OpenCode 会全局扫描 `~/.agents/skills/` 与 `~/.claude/skills/`（跨宿主兼容）；
+     我们只写自己的根。`description` 缺失的技能会被 OpenCode 过滤。
+  4. 验证：cargo test **167 passed / 0 failed**；干跑 **0 项未通过**（快照 2951 项
+     零改动）；硬链接组 links=4 + md5 全等；真实目录无新增备份。
+  5. **支持工具数 3 → 4**。L0「真模型读到」验证随用户首次启用 OpenCode 同步自然完成
+     （`opencode run` 消耗 API 额度，未自动执行）。
+
 
 ### 2026-09-15 14:40:00 — WorkBuddy（GLM-5.3-Flash）
 
