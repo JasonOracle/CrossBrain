@@ -1809,13 +1809,92 @@ pub fn is_git_available() -> bool {
 #### ✅ 验收检查清单
 
 ```
-[ ] 列表展示 ~/.ai-profile/knowledge/ 下所有 .md 文件（每个文件一张卡片）
-[ ] 卡片显示：文件名（去掉 .md）+ 文件第一行作为摘要
-[ ] 新建技能时，编辑器默认填入 "# [技术/语言] · [具体场景]" 模板
-[ ] 内容超过 2000 字时，编辑器顶部出现黄色警告条（条内文字见 PRD §6.2）
-[ ] 删除技能后，对应的 knowledge/*.md 文件被删除
-[ ] 文件保存到 ~/.ai-profile/knowledge/{slug_without_hash}.md
+[x] 列表展示 ~/.ai-profile/knowledge/ 下所有 .md 文件（每个文件一张卡片）
+    —— `list_knowledge_cards_for()` + `KnowledgeManager.vue` 卡片网格；
+       目录不存在 = 空列表；单文件读取失败 = 显式报错（「读不出来 ≠ 没有」）
+[x] 卡片显示：文件名（去掉 .md）+ 文件第一行作为摘要
+    —— 另按 PRD §6.2 补充展示注入后的目录名（mono 小字）与字数/修改时间
+[x] 新建技能时，编辑器默认填入 "# [技术/语言] · [具体场景]" 模板
+    —— `create_knowledge_for()` 落盘 `NEW_KNOWLEDGE_TEMPLATE`，编辑器直接打开
+[x] 内容超过 2000 字时，编辑器顶部出现黄色警告条（条内文字见 PRD §6.2）
+    —— `RuleEditor.vue` 的 `lengthWarning` prop，n-alert type=warning，原文照录
+[x] 删除技能后，对应的 knowledge/*.md 文件被删除
+    —— `delete_knowledge_file_for()`；重复删除按幂等成功处理；
+       工具内副本等下次「立即同步」清理，确认弹窗已明示此时差
+[x] 文件保存到 ~/.ai-profile/knowledge/{slug_without_hash}.md
+    —— 实施口径见下方修正 ①：文件名 = 标题折算 kebab 段 + `.md`
 ```
+
+#### ⚠️ 实施修正（2026-09-15 09:48，TASK-12）
+
+1. **验收项「保存到 `{slug_without_hash}.md`」含糊，按字面实现会出两处事故**：
+   - 带 hash 段 → 内容一变文件名就得跟着变（hash 是内容寻址），「改一个字文件就改名」；
+     定为**不含 hash**，kebab 段承担区分、hash 段只在注入目录名里。
+   - 带 `crossbrain-` 前缀 → 文件名再折算时前缀会被原样保留，目录名叠成
+     `crossbrain-crossbrain-…`。定为**不含前缀**。
+   最终口径：**文件名 = 标题折算的 kebab 段 + `.md`**（复用 `slug::kebab_from_title`）。
+   纯中文标题退化为 `item`，**按 `-2`、`-3` 递增去重**——同名覆盖用户内容不可逆
+   （原文未提同名场景，这是必须补的防线）。
+2. **PRD §6.2 要求卡片同时展示「源文件名」与「注入后的目录名」**（验收清单没写）。
+   已实现：目录名以 mono 小字常驻卡片，ADR-11 的可读性补偿 + 排障入口。
+3. **保存走 `write_breaking_hardlink()` 而不是 `fs::write`**：万一用户把某个知识文件
+   硬链进了自己的记忆中心，原地覆盖会顺着链接改掉另一头的文件——与 L0 写入同一防线。
+4. **前端传来的文件名必须校验**（`validated_knowledge_path`）：它直接拼进真实路径，
+   `../`、反斜杠、绝对路径都能越出 `knowledge/` 目录读写任意文件。
+   拒绝：空 / 含 `/`、`\`、`\0` / 含 `..` / 非 `.md` 扩展名。
+5. **`useRuleEditor` 泛化**：状态机加 `EditorIO` 注入点（`load/save` 通道）与
+   `openFile()` / `close()`；原「`load()` 只在首次真正读」的语义保留。
+   `openFile()` 会**有意覆盖**未保存的内存现场，「离开编辑现场」的确认放视图层
+   （`KnowledgeManager.vue` 的 `pendingDiscard`），数据层不掺交互。
+6. **`RuleEditor.vue` props 化**（`templates` / `footnote` / `placeholder` /
+   `lengthWarning`）供两个页面共用。坑：`withDefaults` 里数组/对象类型的默认值
+   **必须是工厂函数**（`templates: () => RULE_TEMPLATES`），直接给常量 vue-tsc 报 TS2322。
+7. **删除后不触发同步**（与 TASK-11「编辑≠同步」同源）：工具内副本要等下次
+   「立即同步」按孤儿清理移除。**这个时差必须由 UI 明示**，否则用户会以为
+   工具里的技能已经消失。已写进删除确认弹窗与成功 Toast。
+8. **`dryrun_sync` 的快照范围扩大**：把 `~/.ai-profile/global/rules.md` 与
+   `~/.ai-profile/knowledge/` 加进 watched——此前 SSOT 侧完全不在回归比对里，
+   「真实目录零改动」对这一半是空话。
+9. **列表的失败语义**：目录不存在 = 空列表（`scan_knowledge` 同款兜底）；
+   单个文件读失败 = 整体报错而不是悄悄少一篇——少一篇会让用户误以为删过了。
+10. **流程教训（再次踩中）**：同一条消息里对 `ipc_contract.rs` 并行发起两处 Edit，
+    其中一处被静默丢弃——靠「新测试在变异下没变红」的反向验证才暴露。
+    此条已在记忆库，但再次证明：**同文件多次编辑必须串行**。
+
+#### ✅ 实施记录（2026-09-15 09:48，TASK-12）
+
+**交付文件**
+
+| 文件 | 内容 |
+|:---|:---|
+| `src-tauri/src/sync.rs` | `KnowledgeCard` DTO、`NEW_KNOWLEDGE_TEMPLATE`、知识库 CRUD 五组函数（生产 + `_for(dir)` 可注入变体）、`validated_knowledge_path()`；测试 +5（CRUD 回环 / 同名去重 / 空标题拒绝 / 穿越拦截 / 空目录与非 md 过滤） |
+| `src-tauri/src/slug.rs` | `kebab_from_title()` 公开入口（复用 `filename_to_kebab`，保证文件名与注入目录名的 kebab 段同源） |
+| `src-tauri/src/commands.rs` / `lib.rs` | `list_knowledge` / `read_knowledge` / `create_knowledge` / `save_knowledge` / `delete_knowledge` 五条命令并注册；删除返回面向用户的成功文案（含清理时机） |
+| `src/api.ts` | `KnowledgeCard` 接口 + 五个封装函数 |
+| `src/composables/useRuleEditor.ts` | `EditorIO` 注入点、`openFile()` / `close()`；全局规则走默认通道 |
+| `src/components/RuleEditor.vue` | props 化（templates / footnote / placeholder / lengthWarning）；2000 字黄色警告条（PRD §6.2 原文）；字数显示 |
+| `src/components/KnowledgeManager.vue`（新） | 卡片网格（标题/摘要/目录名/字数/时间）、新建弹窗（标题→文件名规则明示）、删除二次确认、未保存修改的离开确认、列表↔编辑视图切换 |
+| `src/views/MainView.vue` | 「技能知识」Tab 从占位换成 `KnowledgeManager` |
+| `src-tauri/tests/ipc_contract.rs` | DTO 字段对 +4（fileName/dirName/skillName/charCount）、命令参数名两侧比对、`knowledge_manager_never_triggers_sync`、`KnowledgeManager.vue` 加进界面术语检查列表 |
+
+**实测验证**（均为本轮真实运行结果）
+
+| 项 | 结果 |
+|:---|:---|
+| `cargo test` | **127 passed / 0 failed / 0 warning**（109 lib + 7 + 11 契约，较 TASK-11 的 120 +7） |
+| `dryrun_sync`（新增 [12] 节，共 12 节） | **0 项检查未通过**；新建/去重/列表/保存/穿越拒绝/幂等删除全过 |
+| `pnpm build` | 干净通过（487.57 kB / gzip 162.09 kB） |
+| 反向验证 | 两条新文本断言在变异下**如期变红**（runSync 注入 / 参数名改动），还原后复绿 |
+| 真实数据回归 | 4+1 硬链接组 md5 `47645f60…` 不变、`knowledge/` 保持 0 项、`rules.md` md5 `f0b10675…` 零改动 |
+
+**给后续任务的约束**
+
+1. 知识库的读写/删除入口只允许经 `sync.rs` 的 `_for` 函数族，文件名必须过
+   `validated_knowledge_path`——任何绕过校验直接 `paths::knowledge_dir().join(前端输入)`
+   的写法都是路径穿越漏洞。
+2. `KnowledgeManager.vue` 已加入 `wizard_copy_has_no_internal_terms` 的检查列表。
+3. 编辑器状态机再扩展时（如 TASK-13 的同步结果页复用预览），保持「保存不触发同步」
+   的两条契约测试覆盖面。
 
 ### TASK-13：同步状态栏 + 立即同步
 

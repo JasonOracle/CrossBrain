@@ -46,7 +46,7 @@
 //! 宁可让用户看到「同步失败」，也不能让它在数据不完整时执行删除。
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -413,6 +413,233 @@ fn format_local_time(time: std::time::SystemTime) -> String {
     dt.format("%Y-%m-%d %H:%M").to_string()
 }
 
+// ============================================================================
+// 技能知识库 CRUD（TASK-12）
+// ============================================================================
+
+/// 知识库卡片（列表视图的一行）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeCard {
+    /// 源文件名（含 `.md`）
+    pub file_name: String,
+    /// 文件名去掉 `.md`（卡片主标题）
+    pub title: String,
+    /// 第一行非空内容，去掉行首标题记号（一行摘要）
+    pub summary: String,
+    /// 注入后的技能目录名（如 `crossbrain-vue3-9f86d0`）。
+    ///
+    /// 必须展示：V1 不做拼音转换，纯中文标题的目录名会退化成
+    /// `crossbrain-item-{hash}`，只看目录名无法对应回源文件（ADR-11 补偿）。
+    pub dir_name: String,
+    /// frontmatter 的技能名（kebab 段）
+    pub skill_name: String,
+    /// 字符数（编辑器的 2000 字警告由前端按内容实时算，这里是卡片展示值）
+    pub char_count: usize,
+    /// 文件大小（字节）
+    pub size_bytes: u64,
+    /// 最后修改时间（`YYYY-MM-DD HH:MM`），读不到为 `None`
+    pub modified_at: Option<String>,
+}
+
+/// 新建技能知识时预填的正文（PRD §6.2 的默认标题模板）。
+pub const NEW_KNOWLEDGE_TEMPLATE: &str = "# [技术/语言] · [具体场景]\n\n在这里写这篇技能知识的正文：它教会 AI 在这个具体场景下该怎么做。\
+每篇只讲一个具体主题，超过 2000 字建议拆成多篇。\n";
+
+/// 列出知识库卡片（生产路径）。
+pub fn list_knowledge_cards() -> Result<Vec<KnowledgeCard>, String> {
+    list_knowledge_cards_for(&paths::knowledge_dir())
+}
+
+/// 对给定目录列出知识库卡片（可注入，供测试与干跑用）。
+///
+/// 与 [`run_for_tools`] 同一条理由：生产路径由 [`crate::paths`] 固定，
+/// 本机 `~/.ai-profile/` 是真实用户数据，端到端验证必须在副本上做。
+pub fn list_knowledge_cards_for(dir: &Path) -> Result<Vec<KnowledgeCard>, String> {
+    // 目录不存在 = 用户还没写过知识，等价于「空列表」（与 scan_knowledge 一致）
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let entries = fs::read_dir(dir)
+        .map_err(|_| "无法读取技能知识目录，请检查文件夹访问权限。".to_string())?;
+
+    let mut cards = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.map_err(|_| "读取技能知识目录时出错，请重试。".to_string())?;
+        let path = entry.path();
+
+        let is_md_file = entry
+            .file_type()
+            .map(|t| t.is_file())
+            .unwrap_or(false)
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("md"))
+                .unwrap_or(false);
+        if !is_md_file {
+            continue;
+        }
+
+        // 与 scan_knowledge 同一条原则：读不出来 ≠ 没有。
+        // 列表悄悄少一篇，用户会误以为那篇已经被删掉了——宁可直接报错。
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let body = fs::read_to_string(&path).map_err(|_| {
+            format!("技能知识「{file_name}」无法读取，请检查文件是否被其它程序占用。")
+        })?;
+
+        let slug = slug::generate_parts(&file_name, &body);
+        // `.md` 扩展名是 ASCII，末尾 3 字节必然是字符边界，可直接切
+        let title = file_name[..file_name.len() - 3].to_string();
+        let meta = fs::metadata(&path).ok();
+
+        cards.push(KnowledgeCard {
+            title,
+            summary: first_line_summary(&body),
+            dir_name: slug.dir_name().to_string(),
+            skill_name: slug.skill_name().to_string(),
+            char_count: body.chars().count(),
+            size_bytes: meta.as_ref().map(|m| m.len()).unwrap_or(0),
+            modified_at: meta.and_then(|m| m.modified().ok()).map(format_local_time),
+            file_name,
+        });
+    }
+
+    cards.sort_by(|a, b| a.file_name.cmp(&b.file_name));
+    Ok(cards)
+}
+
+/// 卡片摘要：第一个非空行，去掉行首的 `#` 记号与空白。
+fn first_line_summary(body: &str) -> String {
+    body.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.trim_start_matches('#').trim().to_string())
+        .unwrap_or_default()
+}
+
+/// 校验前端传来的知识文件名，返回安全的完整路径。
+///
+/// 文件名会拼进真实路径，**绝不能**信任原始输入：
+/// 路径分隔符、上跳序列都能越过 `knowledge/` 目录读写任意文件。
+fn validated_knowledge_path(dir: &Path, file_name: &str) -> Result<PathBuf, String> {
+    let reject =
+        |why: &str| -> Result<PathBuf, String> { Err(format!("文件名不合法（{why}），已拒绝操作。")) };
+
+    if file_name.is_empty() {
+        return reject("为空");
+    }
+    if file_name.contains('/') || file_name.contains('\\') || file_name.contains('\0') {
+        return reject("包含路径分隔符");
+    }
+    if file_name.contains("..") {
+        return reject("包含相对路径");
+    }
+    let is_md = Path::new(file_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("md"))
+        .unwrap_or(false);
+    if !is_md {
+        return reject("不是 .md 文件");
+    }
+    Ok(dir.join(file_name))
+}
+
+/// 读取一篇技能知识的正文（生产路径）。
+pub fn read_knowledge_file(file_name: &str) -> Result<String, String> {
+    read_knowledge_file_for(&paths::knowledge_dir(), file_name)
+}
+
+/// 对给定目录读取一篇技能知识（可注入）。
+pub fn read_knowledge_file_for(dir: &Path, file_name: &str) -> Result<String, String> {
+    let path = validated_knowledge_path(dir, file_name)?;
+    fs::read_to_string(&path)
+        .map_err(|_| format!("技能知识「{file_name}」无法读取，请检查文件是否被其它程序占用。"))
+}
+
+/// 新建一篇技能知识，预填标题模板，返回新文件名（编辑器据此打开）。
+///
+/// 文件名 = 标题折算的 kebab 段 + `.md`（验收项「保存到
+/// `{slug_without_hash}.md`」的落地形态：不含 hash 段、不含 `crossbrain-`
+/// 前缀——带上前者会让同名内容互相覆盖，带上后者会让 slug 折算时
+/// 再叠一层前缀）。纯中文标题会退化为 `item`，此处按 `-2`、`-3` 递增去重。
+pub fn create_knowledge(title: &str) -> Result<String, String> {
+    create_knowledge_for(&paths::knowledge_dir(), title)
+}
+
+/// 对给定目录新建一篇技能知识（可注入）。
+pub fn create_knowledge_for(dir: &Path, title: &str) -> Result<String, String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Err("请先给这篇技能知识起个标题，再点新建。".to_string());
+    }
+
+    fs::create_dir_all(dir)
+        .map_err(|_| "无法创建技能知识目录，请检查文件夹访问权限。".to_string())?;
+
+    let base = slug::kebab_from_title(trimmed);
+    let mut candidate = base.clone();
+    let mut n = 1;
+    while dir.join(format!("{candidate}.md")).exists() {
+        n += 1;
+        candidate = format!("{base}-{n}");
+    }
+
+    let file_name = format!("{candidate}.md");
+    fs::write(dir.join(&file_name), NEW_KNOWLEDGE_TEMPLATE)
+        .map_err(|_| format!("无法创建「{file_name}」，请检查文件夹访问权限。"))?;
+    Ok(file_name)
+}
+
+/// 保存一篇技能知识的正文（生产路径）。
+pub fn save_knowledge_file(file_name: &str, content: &str) -> Result<(), String> {
+    save_knowledge_file_for(&paths::knowledge_dir(), file_name, content)
+}
+
+/// 对给定目录保存一篇技能知识（可注入）。
+///
+/// 写入走 [`crate::adapters::write_breaking_hardlink`]：万一用户把某个知识
+/// 文件硬链接进了自己的记忆中心，原地覆盖会顺着链接改掉另一头的文件；
+/// 断链写入把影响限制在 CrossBrain 这一份内（与 L0 写入同一防线）。
+pub fn save_knowledge_file_for(dir: &Path, file_name: &str, content: &str) -> Result<(), String> {
+    let path = validated_knowledge_path(dir, file_name)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|_| "无法创建技能知识目录，请检查文件夹访问权限。".to_string())?;
+    }
+    crate::adapters::write_breaking_hardlink(&path, content).map_err(|_| {
+        format!("保存「{file_name}」失败，请检查文件是否被其它程序占用，或没有写入权限。")
+    })
+}
+
+/// 删除一篇技能知识（生产路径）。
+///
+/// 各工具里已注入的对应技能目录**不会**被立即删除——它们要等下一次
+/// 「立即同步」按孤儿清理规则移除。界面必须把这个时差告诉用户。
+pub fn delete_knowledge_file(file_name: &str) -> Result<(), String> {
+    delete_knowledge_file_for(&paths::knowledge_dir(), file_name)
+}
+
+/// 对给定目录删除一篇技能知识（可注入）。
+pub fn delete_knowledge_file_for(dir: &Path, file_name: &str) -> Result<(), String> {
+    let path = validated_knowledge_path(dir, file_name)?;
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        // 已不存在 = 删除目标已达成，按幂等成功处理
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(format!(
+            "删除「{file_name}」失败，请检查文件是否被其它程序占用。"
+        )),
+    }
+}
+
 /// 执行完整同步，不汇报进度。
 ///
 /// 供不需要实时进度的调用方使用（测试、将来的后台自动同步）。
@@ -748,5 +975,148 @@ mod tests {
         assert!(report.tools.is_empty());
         assert!(!report.ok);
         assert_eq!(report.error.as_deref(), Some("测试中止"));
+    }
+
+    // ------------------------------------------------------------------------
+    // 知识库 CRUD（TASK-12）——全部走 `_for(dir)` 注入临时目录
+    // ------------------------------------------------------------------------
+
+    /// 独占临时目录：目录名带进程内自增序号，`Drop` 时尽力清理。
+    struct TempKnowledgeDir(PathBuf);
+    impl TempKnowledgeDir {
+        fn new() -> Self {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static SEQ: AtomicU32 = AtomicU32::new(0);
+            let n = SEQ.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "crossbrain-knowledge-test-{}-{n}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            TempKnowledgeDir(dir)
+        }
+    }
+    impl Drop for TempKnowledgeDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// 新建 → 列表 → 读取 → 保存 → 删除 的正常链路。
+    #[test]
+    fn knowledge_crud_roundtrip() {
+        let tmp = TempKnowledgeDir::new();
+
+        // 新建：文件名 = 标题 kebab 段 + .md，内容是标题模板
+        let file_name = create_knowledge_for(&tmp.0, "Vue3 组件性能优化").unwrap();
+        assert_eq!(file_name, "vue3.md", "kebab 段折叠中文（V1 不做拼音）");
+        let body = read_knowledge_file_for(&tmp.0, &file_name).unwrap();
+        assert!(body.starts_with("# [技术/语言] · [具体场景]"));
+
+        // 列表：主标题去 .md、摘要是第一行非空内容、目录名形态正确
+        let cards = list_knowledge_cards_for(&tmp.0).unwrap();
+        assert_eq!(cards.len(), 1);
+        let card = &cards[0];
+        assert_eq!(card.title, "vue3");
+        assert_eq!(card.summary, "[技术/语言] · [具体场景]");
+        assert!(card.dir_name.starts_with("crossbrain-vue3-"));
+        assert!(card.char_count > 0);
+        assert!(card.modified_at.is_some());
+
+        // 保存：内容变更后列表的摘要与字数随之更新
+        save_knowledge_file_for(&tmp.0, &file_name, "# 新标题\n新内容").unwrap();
+        let card = &list_knowledge_cards_for(&tmp.0).unwrap()[0];
+        assert_eq!(card.summary, "新标题");
+        assert_eq!(card.char_count, "# 新标题\n新内容".chars().count());
+
+        // 删除：文件消失，再删一次仍成功（幂等）
+        delete_knowledge_file_for(&tmp.0, &file_name).unwrap();
+        assert!(!tmp.0.join(&file_name).exists());
+        delete_knowledge_file_for(&tmp.0, &file_name).unwrap();
+    }
+
+    /// 同名标题必须去重而不是互相覆盖——覆盖用户内容不可逆。
+    #[test]
+    fn create_dedupes_filename_instead_of_overwriting() {
+        let tmp = TempKnowledgeDir::new();
+
+        let a = create_knowledge_for(&tmp.0, "优化").unwrap();
+        let b = create_knowledge_for(&tmp.0, "优化").unwrap();
+        assert_ne!(a, b, "同名标题不得复用同一文件名");
+        assert_eq!(a, "item.md", "纯中文标题退化为兜底 kebab 段");
+        assert_eq!(b, "item-2.md");
+        assert_eq!(read_knowledge_file_for(&tmp.0, &a).unwrap(), NEW_KNOWLEDGE_TEMPLATE);
+        assert_eq!(read_knowledge_file_for(&tmp.0, &b).unwrap(), NEW_KNOWLEDGE_TEMPLATE);
+
+        // 手工占位文件也会被去重逻辑避开
+        fs::write(tmp.0.join("note.md"), "用户手放的").unwrap();
+        let c = create_knowledge_for(&tmp.0, "note").unwrap();
+        assert_eq!(c, "note-2.md");
+        assert_eq!(read_knowledge_file_for(&tmp.0, "note.md").unwrap(), "用户手放的");
+    }
+
+    /// 空标题拒绝新建——它会退化成 `item.md`，与用户预期完全无关。
+    #[test]
+    fn create_rejects_blank_title() {
+        let tmp = TempKnowledgeDir::new();
+        assert!(create_knowledge_for(&tmp.0, "  ").is_err());
+        assert!(create_knowledge_for(&tmp.0, "").is_err());
+        assert_eq!(list_knowledge_cards_for(&tmp.0).unwrap(), Vec::<KnowledgeCard>::new());
+    }
+
+    /// 前端传来的文件名是路径拼接的输入，必须挡住穿越与越界。
+    #[test]
+    fn knowledge_file_name_validation_blocks_traversal() {
+        let tmp = TempKnowledgeDir::new();
+
+        let evil = [
+            "../rules.md",
+            "..\\rules.md",
+            "a/b.md",
+            r"a\b.md",
+            "..",
+            ".md",
+            "note.txt",
+            "note",
+            "",
+        ];
+        for name in evil {
+            assert!(
+                read_knowledge_file_for(&tmp.0, name).is_err(),
+                "「{name}」应被拒绝"
+            );
+            assert!(
+                save_knowledge_file_for(&tmp.0, name, "x").is_err(),
+                "「{name}」应被拒绝"
+            );
+            assert!(
+                delete_knowledge_file_for(&tmp.0, name).is_err(),
+                "「{name}」应被拒绝"
+            );
+        }
+
+        // 拒绝动作本身不能在目录外留下任何文件
+        let outside = tmp.0.parent().unwrap().join("rules.md");
+        assert!(!outside.exists(), "穿越文件名不得在知识目录外产生文件");
+    }
+
+    /// 目录不存在 = 「空列表」而不是错误（与 `scan_knowledge` 的兜底一致）；
+    /// 子目录与非 `.md` 文件一律不进列表。
+    #[test]
+    fn list_treats_missing_dir_as_empty_and_skips_non_md() {
+        // 不存在 → Ok(空)
+        let missing = TempKnowledgeDir::new();
+        fs::remove_dir(&missing.0).unwrap();
+        assert_eq!(list_knowledge_cards_for(&missing.0).unwrap(), Vec::<KnowledgeCard>::new());
+
+        // 混入子目录与 .txt → 只剩 .md
+        let tmp = TempKnowledgeDir::new();
+        fs::write(tmp.0.join("a.md"), "# A").unwrap();
+        fs::write(tmp.0.join("b.txt"), "B").unwrap();
+        fs::create_dir(tmp.0.join("c.md")).unwrap();
+        let cards = list_knowledge_cards_for(&tmp.0).unwrap();
+        assert_eq!(cards.len(), 1, "实际：{:?}", cards.iter().map(|c| &c.file_name).collect::<Vec<_>>());
+        assert_eq!(cards[0].file_name, "a.md");
     }
 }

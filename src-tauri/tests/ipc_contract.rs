@@ -155,6 +155,11 @@ fn dto_fields_are_mirrored_on_both_sides() {
         ("exists", "exists"),
         ("sizeBytes", "size_bytes"),
         ("modifiedAt", "modified_at"),
+        // TASK-12 新增：技能知识卡片
+        ("fileName", "file_name"),
+        ("dirName", "dir_name"),
+        ("skillName", "skill_name"),
+        ("charCount", "char_count"),
     ];
 
     for (ts_name, rust_name) in pairs {
@@ -216,6 +221,8 @@ fn wizard_copy_has_no_internal_terms() {
         "src/components/LinkNoticeDialog.vue",
         // TASK-11：全局规则编辑器（挂载在主工作台的 Tab 里）
         "src/components/RuleEditor.vue",
+        // TASK-12：技能知识卡片列表（同样挂载在主工作台的 Tab 里）
+        "src/components/KnowledgeManager.vue",
     ];
 
     for rel in user_facing {
@@ -246,6 +253,39 @@ fn restore_backup_argument_name_matches_on_both_sides() {
         commands.contains("pub fn restore_backup(tool_id: String)"),
         "Rust 侧 restore_backup 的参数名已改动，前端传的 toolId 会对不上"
     );
+}
+
+/// 技能知识四条命令的**参数名**两侧必须一致（TASK-12）。
+///
+/// 与 `restore_backup_argument_name_matches_on_both_sides` 同一故障模型：
+/// 参数名写错不报编译错，只在用户点按钮时静默失效。
+#[test]
+fn knowledge_command_argument_names_match_on_both_sides() {
+    let api = strip_line_comments(&repo_file("src/api.ts"));
+    for snippet in [
+        r#"invoke<string>("read_knowledge", { fileName })"#,
+        r#"invoke<string>("create_knowledge", { title })"#,
+        r#"invoke<void>("save_knowledge", { fileName, content })"#,
+        r#"invoke<string>("delete_knowledge", { fileName })"#,
+    ] {
+        assert!(
+            api.contains(snippet),
+            "api.ts 中找不到 `{snippet}`——前端参数名可能已被改动"
+        );
+    }
+
+    let commands = repo_file("src-tauri/src/commands.rs");
+    for snippet in [
+        "pub fn read_knowledge(file_name: String)",
+        "pub fn create_knowledge(title: String)",
+        "pub fn save_knowledge(file_name: String, content: String)",
+        "pub fn delete_knowledge(file_name: String)",
+    ] {
+        assert!(
+            commands.contains(snippet),
+            "commands.rs 中找不到 `{snippet}`——Rust 侧参数名已改动，前端传的 camelCase 会对不上"
+        );
+    }
 }
 
 /// 断链说明的「已展示」标记必须发生在用户**确认之后**（TASK-19 / ADR-15）。
@@ -342,5 +382,27 @@ fn markdown_preview_must_escape_raw_html() {
         "markdown-it 的 html 选项被打开了——预览会把原始 HTML 插进 DOM，\
          而当前 CSP 为 null，脚本会在 webview 里执行。\
          若确需打开，必须同时补 CSP 与 sanitizer，并更新本测试"
+    );
+}
+
+/// 技能知识的新建/保存/删除同样**绝不**顺带触发同步（TASK-12）。
+///
+/// 与 `rule_editor_saving_never_triggers_sync` 同一条原则，但对象不同：
+/// 知识的删除会把对应技能目录留给下一次同步清理——如果删除动作自己
+/// 偷偷跑一次同步，用户就失去了「先看看删了什么、攒一批再推」的控制权，
+/// 也让「每一步都有明确时机」的同步模型出现暗门。
+#[test]
+fn knowledge_manager_never_triggers_sync() {
+    let code = strip_line_comments(&repo_file("src/components/KnowledgeManager.vue"));
+    assert!(
+        !code.contains("runSync"),
+        "KnowledgeManager.vue 里出现了 runSync —— 知识库的编辑/删除动作会顺带触发同步，\
+         违背「编辑与同步是两个独立动作」"
+    );
+
+    // 反向护栏：确认知识库链路确实接上了，否则上面的断言恒为真
+    assert!(
+        code.contains("saveKnowledge(") && code.contains("listKnowledge("),
+        "KnowledgeManager.vue 里找不到知识库读写调用——链路断了，上面的断言因此恒为真"
     );
 }

@@ -9,10 +9,10 @@
 
 | 项目 | 状态 |
 |:---|:---|
-| **当前阶段** | 🔄 **第 3 阶段：前端控制台** — TASK-01~08 ✅、TASK-09 ⏸️ 暂缓、**TASK-10 ✅**、**TASK-18 ✅（增补：Codex 接入，含第二轮修正 + Spike 闭环）**、**TASK-19 ✅（增补：改动知情与可逆）**、**TASK-11 ✅（全局规则编辑器）**，进入 TASK-12 |
+| **当前阶段** | 🔄 **第 3 阶段：前端控制台** — TASK-01~08 ✅、TASK-09 ⏸️ 暂缓、**TASK-10 ✅**、**TASK-18 ✅（增补：Codex 接入，含第二轮修正 + Spike 闭环）**、**TASK-19 ✅（增补：改动知情与可逆）**、**TASK-11 ✅（全局规则编辑器）**、**TASK-12 ✅（技能知识卡片列表）**，进入 TASK-13 |
 | **当前日期** | 2026-09-15 |
 | **计划交付** | 2026-09-28（两周） |
-| **下一个任务** | `TASK-12`：技能知识卡片列表（新建 / 编辑 / 删除，超 2000 字警告）——应复用 `useRuleEditor` 的基线/dirty 思路与 `.md-preview` 样式<br>✅ `TASK-11` **已于 2026-09-15 00:55 完成**：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原<br>✅ **版本控制已接入**（2026-09-15 00:20）：远端 `git@github.com:JasonOracle/CrossBrain.git`，约定「一个 task 一个提交」 |
+| **下一个任务** | `TASK-13`：同步状态栏 + 立即同步的收尾打磨（外壳与「立即同步」已在 TASK-10 落地，本任务补齐验收项逐条核对）<br>✅ `TASK-12` **已于 2026-09-15 09:48 完成**：知识卡片列表 + 逐篇编辑 + 2000 字警告 + 新建/删除（文件名 = 标题 kebab 段 + `.md`，同名自动去重）<br>✅ `TASK-11` 已于 2026-09-15 00:55 完成：左右分栏编辑器 + 实时预览 + 保存与同步分离<br>✅ `TASK-19`（P1，数据安全红线）已于 2026-09-15 00:10 完成：断链首次同步前告知 + 备份一键还原<br>✅ **版本控制已接入**（2026-09-15 00:20）：远端 `git@github.com:JasonOracle/CrossBrain.git`，约定「一个 task 一个提交」 |
 | **环境状态** | ✅ Rust 1.98.1 (MSVC) + VS Build Tools 2022；`~/.ai-profile/` SSOT 底座就绪；**IPC 层已打通，首次运行向导已端到端验证**；**支持工具数 2 → 3**（Claude Code / Antigravity IDE / Codex） |
 
 ---
@@ -215,7 +215,13 @@
     干跑改为预状态自适应（首注 / 更新两分支各自的不变式）
   - 详见 `TASK_BREAKDOWN.md` TASK-11「实施修正 10 条 + 实施记录」
 
-- 🔲 **TASK-12**：技能知识卡片列表（新建 / 编辑 / 删除，超 2000 字警告）
+- ✅ **TASK-12**：技能知识卡片列表（新建 / 编辑 / 删除，超 2000 字警告）（2026-09-15 09:48 完成）
+  - 卡片网格：标题（文件名去 `.md`）+ 第一行摘要 + **注入目录名**（PRD §6.2 / ADR-11 补偿）+ 字数与修改时间
+  - 新建：文件名 = 标题 kebab 段 + `.md`（无 hash、无前缀），同名自动 `-2/-3` 去重；预填 `# [技术/语言] · [具体场景]` 模板
+  - 编辑：复用 `RuleEditor.vue`（props 化）与 `useRuleEditor`（`EditorIO` 注入），超 2000 字黄色警告条（PRD §6.2 原文）
+  - 删除：二次确认 + 明示「工具内副本下次同步清理」；文件名校验防路径穿越；重复删除幂等
+  - 详见 `TASK_BREAKDOWN.md` TASK-12「实施修正 10 条 + 实施记录」
+
 - 🔲 **TASK-13**：同步状态栏 + 「立即同步」按钮（含离线模式指示）
 - 🔲 **TASK-14**：设置页「一键卸载 / 去痕」功能
 
@@ -314,6 +320,25 @@
 > ```
 
 ---
+
+### 2026-09-15 09:48:51 — WorkBuddy（DeepSeek-V4.1-Flash）
+
+- 完成：**TASK-12 技能知识卡片列表**（列表 / 新建 / 编辑 / 删除 + 2000 字警告）
+- 修改文件：
+  - Rust：`sync.rs`（KnowledgeCard + CRUD 五组函数 + 文件名校验 + 测试×5）、
+    `slug.rs`（`kebab_from_title`）、`commands.rs` / `lib.rs`（5 条命令）、
+    `examples/dryrun_sync.rs`（新增 [12] 节 + SSOT 侧纳入快照）、
+    `tests/ipc_contract.rs`（字段对 +4 / 参数名比对 / never_triggers_sync / 术语列表）
+  - 前端：`api.ts`、`composables/useRuleEditor.ts`（EditorIO 注入 + openFile/close）、
+    `components/RuleEditor.vue`（props 化 + 2000 字警告条）、
+    `components/KnowledgeManager.vue`（新）、`views/MainView.vue`
+  - 文档：`TASK_BREAKDOWN.md`（修正 10 条 + 实施记录）、本文件三处、记忆库
+- 验证：cargo test **127 passed / 0 failed / 0 warning**；dryrun_sync 12 节 **0 项未通过**；
+  `pnpm build` 通过；两条新文本断言反向验证；真实数据零改动
+  （4+1 硬链接组 / knowledge 0 项 / rules.md md5 `f0b10675…`）
+- 注意事项：① 验收项「{slug_without_hash}.md」歧义已修正为「标题 kebab 段 + `.md`」，
+  同名自动去重（覆盖不可逆）② 保存走 `write_breaking_hardlink`（知识文件可能被用户
+  硬链）③ 再次踩中「同消息并行编辑同一文件丢改」——被反向验证抓出，教训已记档
 
 ### 2026-09-15 00:55:35 — WorkBuddy（DeepSeek-V4.1-Flash）
 

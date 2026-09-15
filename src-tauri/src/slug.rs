@@ -146,6 +146,21 @@ pub fn generate_parts(filename: &str, content: &str) -> Slug {
     }
 }
 
+/// 将用户输入的标题折算为知识库文件名的 kebab 段（TASK-12）。
+///
+/// 这是 [`filename_to_kebab`] 的公开入口：新建技能知识时，文件名 =
+/// `{kebab}.md`（不含 hash 段——同一段 kebab 会随内容变化换目录，
+/// 文件名层再带 hash 只会制造「改一个字文件就改名」的错觉；
+/// 不含 `crossbrain-` 前缀——文件名折算时前缀会被原样保留，
+/// 叠加成 `crossbrain-crossbrain-…`）。复用同一套折算规则保证
+/// 「文件名」与「注入目录名的 kebab 段」形态一致。
+///
+/// 纯中文标题会退化为 [`FALLBACK_KEBAB`]，调用方必须自行去重
+/// （`sync.rs` 的 `create_knowledge_for` 按 `-2`、`-3` 递增）。
+pub fn kebab_from_title(title: &str) -> String {
+    filename_to_kebab(title)
+}
+
 /// 从知识文件名和内容生成 `crossbrain-{kebab}-{hash}` 标识符。
 ///
 /// # 参数

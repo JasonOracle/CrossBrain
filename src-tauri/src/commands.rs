@@ -20,7 +20,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::state;
-use crate::sync::{self, BackupInfo, SyncReport, ToolInfo};
+use crate::sync::{self, BackupInfo, KnowledgeCard, SyncReport, ToolInfo};
 
 /// 应用启动时需要知道的全部状态。
 #[derive(Debug, Clone, Serialize)]
@@ -169,4 +169,46 @@ pub fn restore_backup(tool_id: String) -> Result<String, String> {
 #[tauri::command]
 pub fn mark_link_notice_shown() -> Result<(), String> {
     state::mark_link_notice_shown().map_err(|_| "无法保存设置，请检查磁盘权限".to_string())
+}
+
+// ============================================================================
+// 技能知识库 CRUD（TASK-12）
+// ============================================================================
+
+/// 列出技能知识卡片（「技能知识」页的列表数据）。
+#[tauri::command]
+pub fn list_knowledge() -> Result<Vec<KnowledgeCard>, String> {
+    sync::list_knowledge_cards()
+}
+
+/// 读取一篇技能知识的正文（编辑器回填）。
+#[tauri::command]
+pub fn read_knowledge(file_name: String) -> Result<String, String> {
+    sync::read_knowledge_file(&file_name)
+}
+
+/// 新建一篇技能知识（预填标题模板），返回新文件名。
+///
+/// 与保存/同步严格无关——建好只是落一篇空模板到本机，推送仍由用户点「立即同步」。
+#[tauri::command]
+pub fn create_knowledge(title: String) -> Result<String, String> {
+    sync::create_knowledge(&title)
+}
+
+/// 保存一篇技能知识的正文。
+///
+/// ⚠️ 与 [`save_global_rules`] 同一条约定：**保存不触发同步**。
+#[tauri::command]
+pub fn save_knowledge(file_name: String, content: String) -> Result<(), String> {
+    sync::save_knowledge_file(&file_name, &content)
+}
+
+/// 删除一篇技能知识。
+///
+/// 各工具里已注入的对应技能目录要等**下一次「立即同步」**才被清理；
+/// 这个时差必须由界面明示（返回值是面向用户的成功说明）。
+#[tauri::command]
+pub fn delete_knowledge(file_name: String) -> Result<String, String> {
+    sync::delete_knowledge_file(&file_name)?;
+    Ok("已删除。这个技能在各个工具里的副本，会在你下次点「立即同步」时自动清理。".to_string())
 }

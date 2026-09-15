@@ -60,6 +60,7 @@ fn main() {
 
     // ⚠️ 只快照我们真正会写的那些位置。
     // 整个 ~/.claude/ 可能包含大量缓存与插件，全量哈希既慢又无意义。
+    let real_profile = home.join(".ai-profile");
     let watched: Vec<PathBuf> = vec![
         real_claude.join("CLAUDE.md"),
         real_claude.join("CLAUDE.md.crossbrain-backup"),
@@ -74,6 +75,10 @@ fn main() {
         real_codex.join("AGENTS.md.crossbrain-backup"),
         real_codex.join("AGENTS.md.crossbrain-before-restore"),
         real_codex.join("skills"),
+        // SSOT 侧（TASK-12 增补）：全局规则与知识库目录是用户内容，
+        // 任何一次干跑都不许碰它们
+        real_profile.join("global").join("rules.md"),
+        real_profile.join("knowledge"),
     ];
 
     let before = snapshot_all(&watched);
@@ -523,6 +528,113 @@ fn main() {
             &format!("未知工具的文案应可读（实际：{msg}）"),
         ),
         Ok(_) => c.check(false, "未知工具不该返回成功"),
+    }
+
+    // ⑤ 技能知识库 CRUD（TASK-12）——跑在 `tmp/knowledge/` 上，
+    //    真实的 `~/.ai-profile/knowledge/` 一个字节都不许动（已加入快照比对）
+    println!("\n[12] 技能知识库 CRUD（跑在副本目录上）");
+    let fake_knowledge = tmp.join("knowledge");
+    c.check(
+        sync::list_knowledge_cards_for(&fake_knowledge)
+            .map(|cards| cards.is_empty())
+            .unwrap_or(false),
+        "不存在的知识目录应返回空列表而不是错误",
+    );
+
+    match sync::create_knowledge_for(&fake_knowledge, "Vue3 组件性能优化") {
+        Ok(file_name) => {
+            println!("      新建返回：{file_name}");
+            c.check(
+                file_name == "vue3.md",
+                &format!("新建文件名 = 标题的 kebab 段 + .md（实际：{file_name}）"),
+            );
+        }
+        Err(e) => c.check(false, &format!("新建技能知识失败：{e}")),
+    }
+
+    // 同名标题必须去重，绝不能静默覆盖第一篇
+    match (sync::create_knowledge_for(&fake_knowledge, "Vue3 组件性能优化"), sync::create_knowledge_for(&fake_knowledge, "优化")) {
+        (Ok(second), Ok(third)) => {
+            println!("      去重返回：{second} / {third}");
+            c.check(
+                second == "vue3-2.md",
+                &format!("同名标题自动加序号（实际：{second}）"),
+            );
+            c.check(
+                third == "item.md",
+                &format!("纯中文标题退化为兜底 kebab 段（实际：{third}）"),
+            );
+        }
+        _ => c.check(false, "同名/纯中文标题的新建不应失败"),
+    }
+
+    match sync::list_knowledge_cards_for(&fake_knowledge) {
+        Ok(cards) => {
+            c.check(cards.len() == 3, &format!("列表应有 3 篇（实际 {} 篇）", cards.len()));
+            if let Some(card) = cards.iter().find(|c| c.file_name == "vue3.md") {
+                c.check(card.title == "vue3", "卡片标题 = 文件名去掉 .md");
+                c.check(
+                    card.summary == "[技术/语言] · [具体场景]",
+                    &format!("卡片摘要 = 第一行非空内容（实际：{}）", card.summary),
+                );
+                c.check(
+                    card.dir_name.starts_with("crossbrain-vue3-"),
+                    &format!("注入目录名形态正确且随卡片展示（实际：{}）", card.dir_name),
+                );
+                c.check(card.char_count > 0, "卡片字数已统计");
+            } else {
+                c.check(false, "列表里找不到 vue3.md");
+            }
+        }
+        Err(e) => c.check(false, &format!("列表读取失败：{e}")),
+    }
+
+    // 保存新内容 → 摘要与注入目录名（hash 段）随之更新
+    let dir_name_before = sync::list_knowledge_cards_for(&fake_knowledge)
+        .ok()
+        .and_then(|cards| cards.iter().find(|c| c.file_name == "vue3.md").map(|c| c.dir_name.clone()))
+        .unwrap_or_default();
+    match sync::save_knowledge_file_for(&fake_knowledge, "vue3.md", "# 新主题\n新正文") {
+        Ok(()) => match sync::list_knowledge_cards_for(&fake_knowledge) {
+            Ok(cards) => match cards.iter().find(|c| c.file_name == "vue3.md") {
+                Some(card) => {
+                    c.check(card.summary == "新主题", "保存后摘要随内容更新");
+                    c.check(
+                        card.dir_name != dir_name_before,
+                        "内容变化 → 注入目录名随之变化（hash 段承担区分度）",
+                    );
+                }
+                None => c.check(false, "保存后列表里找不到 vue3.md"),
+            },
+            Err(e) => c.check(false, &format!("保存后列表读取失败：{e}")),
+        },
+        Err(e) => c.check(false, &format!("保存失败：{e}")),
+    }
+
+    // 文件名是路径拼接的输入：穿越与分隔符必须被拒绝
+    c.check(
+        sync::read_knowledge_file_for(&fake_knowledge, "../rules.md").is_err(),
+        "上跳序列的文件名被拒绝",
+    );
+    c.check(
+        sync::delete_knowledge_file_for(&fake_knowledge, "a/b.md").is_err(),
+        "带路径分隔符的文件名被拒绝",
+    );
+    c.check(
+        sync::save_knowledge_file_for(&fake_knowledge, "note.txt", "x").is_err(),
+        "非 .md 扩展名被拒绝",
+    );
+
+    // 删除 + 幂等
+    match sync::delete_knowledge_file_for(&fake_knowledge, "vue3.md") {
+        Ok(()) => {
+            c.check(!fake_knowledge.join("vue3.md").exists(), "删除后文件消失");
+            c.check(
+                sync::delete_knowledge_file_for(&fake_knowledge, "vue3.md").is_ok(),
+                "重复删除按幂等成功处理",
+            );
+        }
+        Err(e) => c.check(false, &format!("删除失败：{e}")),
     }
 
     // ── 收尾 ──

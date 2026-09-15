@@ -8,7 +8,7 @@
  * | 区域 | 归属任务 | 现状 |
  * |:---|:---|:---|
  * | 全局规则编辑器 | TASK-11 | ✅ 已实现（`RuleEditor.vue`） |
- * | 技能知识卡片列表 | TASK-12 | 占位中 |
+ * | 技能知识卡片列表 | TASK-12 | ✅ 已实现（`KnowledgeManager.vue`） |
  * | 设置 / 一键卸载 | TASK-14 | 占位中（备份与还原区已由 TASK-19 落地） |
  *
  * 之所以先做状态栏与「立即同步」，是因为向导结束后用户必须**看到同步结果**
@@ -36,6 +36,7 @@ import {
   type ToolSyncResult,
 } from "../api";
 import LinkNoticeDialog from "../components/LinkNoticeDialog.vue";
+import KnowledgeManager from "../components/KnowledgeManager.vue";
 import RuleEditor from "../components/RuleEditor.vue";
 import { useLinkNotice } from "../composables/useLinkNotice";
 import { useRuleEditor } from "../composables/useRuleEditor";
@@ -312,9 +313,7 @@ function currentLocalTime(): string {
         </n-tab-pane>
 
         <n-tab-pane name="knowledge" tab="技能知识" display-directive="show:lazy">
-          <div class="rounded-xl border border-dashed border-neutral-200 bg-white p-8 text-sm text-neutral-500">
-            技能知识管理正在开发中。
-          </div>
+          <KnowledgeManager />
         </n-tab-pane>
 
         <n-tab-pane name="settings" tab="设置" display-directive="show:lazy">

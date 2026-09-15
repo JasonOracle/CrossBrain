@@ -27,6 +27,11 @@ pub fn run() {
             commands::list_backups,
             commands::restore_backup,
             commands::mark_link_notice_shown,
+            commands::list_knowledge,
+            commands::read_knowledge,
+            commands::create_knowledge,
+            commands::save_knowledge,
+            commands::delete_knowledge,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

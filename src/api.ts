@@ -85,6 +85,32 @@ export interface BackupInfo {
   modifiedAt: string | null;
 }
 
+/**
+ * 技能知识卡片（「技能知识」页的列表数据，TASK-12）。
+ *
+ * `fileName` 是读写/删除操作的寻址键；`dirName` 必须展示——
+ * 纯中文标题的目录名会退化成 `crossbrain-item-{hash}`，
+ * 只看目录名无法对应回源文件（ADR-11 补偿）。
+ */
+export interface KnowledgeCard {
+  /** 源文件名（含 `.md`） */
+  fileName: string;
+  /** 文件名去掉 `.md` */
+  title: string;
+  /** 第一行非空内容（去掉标题记号） */
+  summary: string;
+  /** 注入后的技能目录名（如 `crossbrain-vue3-9f86d0`） */
+  dirName: string;
+  /** frontmatter 的技能名 */
+  skillName: string;
+  /** 字符数 */
+  charCount: number;
+  /** 文件大小（字节） */
+  sizeBytes: number;
+  /** 最后修改时间（`YYYY-MM-DD HH:MM`），读不到为 null */
+  modifiedAt: string | null;
+}
+
 // ============================================================================
 // 命令封装
 // ============================================================================
@@ -150,6 +176,37 @@ export function markLinkNoticeShown(): Promise<void> {
 /** 执行完整同步。进度通过 {@link onSyncProgress} 推送。 */
 export function runSync(): Promise<SyncReport> {
   return invoke<SyncReport>("run_sync");
+}
+
+// ── 技能知识库 CRUD（TASK-12）──
+
+/** 列出技能知识卡片。 */
+export function listKnowledge(): Promise<KnowledgeCard[]> {
+  return invoke<KnowledgeCard[]>("list_knowledge");
+}
+
+/** 读取一篇技能知识的正文。 */
+export function readKnowledge(fileName: string): Promise<string> {
+  return invoke<string>("read_knowledge", { fileName });
+}
+
+/**
+ * 新建一篇技能知识（预填标题模板），返回新文件名。
+ *
+ * ⚠️ 新建**不触发同步**——写完并保存后，由用户点「立即同步」推送。
+ */
+export function createKnowledge(title: string): Promise<string> {
+  return invoke<string>("create_knowledge", { title });
+}
+
+/** 保存一篇技能知识的正文。⚠️ 保存**不会**触发同步。 */
+export function saveKnowledge(fileName: string, content: string): Promise<void> {
+  return invoke<void>("save_knowledge", { fileName, content });
+}
+
+/** 删除一篇技能知识。返回面向用户的成功说明（含工具内副本的清理时机）。 */
+export function deleteKnowledge(fileName: string): Promise<string> {
+  return invoke<string>("delete_knowledge", { fileName });
 }
 
 /**
