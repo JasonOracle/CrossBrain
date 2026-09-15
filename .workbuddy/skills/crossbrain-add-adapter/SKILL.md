@@ -2,7 +2,7 @@
 name: crossbrain-add-adapter
 description: 为 CrossBrain（D:\project\memory1.0）接入一个新的 AI 工具 Adapter，把支持的工具数从 N 提到 N+1。当用户说「接入 X 工具 / 让向导识别 X / 加一个 X adapter / TASK-NN 是接 X」时使用。
 description_zh: "CrossBrain 新增 AI 工具 Adapter 的完整流程：从落点探测到文档同步与安全回归"
-version: 1.4.0
+version: 1.5.0
 agent_created: true
 allowed-tools: Read,Edit,Write,Grep,Glob,Bash,PowerShell
 display_name: "CrossBrain 接入新工具 Adapter"
@@ -167,6 +167,18 @@ fn uninstall(&self) -> Result<Vec<String>, AdapterError> {
 还原手段）。返回值是**面向用户的动作描述**（含「你自己的内容原样保留」），
 不是调试日志。
 
+**还要实现必选方法 `skills_root()`**（TASK-20 探针检测，**无默认实现**——
+不实现编译直接失败，这是刻意的）：
+
+```rust
+fn skills_root(&self) -> PathBuf {
+    self.skills_dir() // 必须与 sync_l2 实际写入的技能目录**同根**
+}
+```
+
+它是探针功能写/删 `crossbrain-probe/` 临时技能的落点依据。写与删若各写一份
+路径，日后分叉就是「探针删不掉」——所以 trait 强制同一个来源。
+
 ⚠️ 本机**存在真实用户数据**：新工具接进来后必须跑安全回归 ——
 硬链接组 md5 一致、用户技能完好、真实目录不出现 `*.crossbrain-backup` /
 `*.crossbrain-before-restore` / `*.crossbrain-tmp`、`~/.ai-profile` 零改动。
@@ -320,6 +332,7 @@ for f in ~/.ai-memory/user_profile.md ~/.cursor/rules/user_profile.md \
 - [ ] 共享层已用上，Adapter 里没有重复的断链/标记块/孤儿逻辑
 - [ ] 形态二 / 三 已覆盖 `l0_backup()`（形态一**不覆盖**，用默认 `None`）
 - [ ] 已覆盖 `uninstall()`（所有形态都要，顺序：移块 → 删备份 → 清技能目录）
+- [ ] 已实现必选 `skills_root()`（与 `sync_l2` 写入目录同根；无默认实现，漏写编译失败）
 - [ ] 若新增了面向用户的界面文件，已加进 `ipc_contract` 的术语检查文件列表
 - [ ] 四处注册点全部落地（`grep` 逐项核验，别等编译）
 - [ ] 新测试全绿，`cargo test` 总数增加且 0 failed / 0 warning
