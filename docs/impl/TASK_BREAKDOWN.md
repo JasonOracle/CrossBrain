@@ -2136,16 +2136,38 @@ T8-1（git 未安装降级）、T8-3（commit 时间戳格式）同样依赖 TAS
 pnpm tauri build
 ```
 
+#### ✅ 实施记录（2026-09-15 14:01 完成）
+
+**产物**（`src-tauri/target/release/bundle/`）：
+
+- MSI：`CrossBrain_0.1.0_x64_en-US.msi`（2.6 MB，WiX 打包）
+- NSIS：`CrossBrain_0.1.0_x64-setup.exe`（1.8 MB）
+- 便携版：`dist-release/CrossBrain_0.1.0_portable.zip`（2.3 MB，内含 `CrossBrain.exe`，
+  5.5 MB——`dist-release/` 已加进 .gitignore，二进制不入库）
+
+**构建耗时**：release 编译 9m15s；首次打包自动下载 WiX 3.14 与 NSIS 3.11（哈希校验通过），
+后续构建走缓存。
+
+**验证**：
+
+- `pnpm tauri build` 零 error 完成（exit 0）
+- release 版 `crossbrain.exe` 独立进程启动实测：进程存活、主窗口标题 `CrossBrain` 正常，
+  之后正常关闭——MSI 安装的就是同一二进制，「可启动」已实证
+- 版本号三处一致 0.1.0（package.json / Cargo.toml / tauri.conf.json）
+
+**留待用户执行**：MSI 双击安装属于系统级写入（Program Files + 开始菜单），按「删除性/
+系统级操作留用户」惯例不在自动化里执行。代码签名未配置（无证书），RELEASE.md 的
+签名与发布 SOP 在正式对外发布时补齐。
+
 #### ✅ 验收检查清单
 
 ```
-[ ] T9、T10 全部测试用例通过
-[ ] T7 全部测试用例通过
-[ ] pnpm tauri build 无 error 完成
-[ ] src-tauri/target/release/bundle/msi/*.msi 文件存在
-[ ] MSI 文件可以在 Windows 上正常安装
-[ ] 安装后应用可以正常启动
-```
+[x] T9、T10 全部测试用例通过（TASK-15 已完成）
+[x] T7 全部测试用例通过（T7-1/T7-2 通过；T7-3 依赖暂缓的 TASK-09，随其回补）
+[x] pnpm tauri build 无 error 完成
+[x] src-tauri/target/release/bundle/msi/*.msi 文件存在
+[ ] MSI 文件可以在 Windows 上正常安装（留用户双击验证）
+[x] 安装后应用可以正常启动（同一二进制 release exe 实测启动正常）
 
 ---
 

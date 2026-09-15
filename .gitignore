@@ -30,6 +30,9 @@ dist-ssr
 **/*.rs.bk
 *.pdb
 
+# --- 发布产物（二进制不入库）---
+/dist-release/
+
 # --- 其他 ---
 Thumbs.db
 Desktop.ini
