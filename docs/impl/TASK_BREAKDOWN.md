@@ -2044,7 +2044,55 @@ pub fn is_git_available() -> bool {
 
 ### TASK-15：端到端测试
 
-执行 TEST_PLAN.md 中的 **T9 端到端流程** 和 **T10 一键卸载**。
+执行 TEST_PLAN.md 的 **T9 端到端流程** 和 **T10 一键卸载**。
+
+#### ✅ 实施记录（2026-09-15 11:12 完成）
+
+**执行方式**：`tauri.conf.json` 临时加 `additionalBrowserArgs --remote-debugging-port=9223`
+（跑完即还原）→ Playwright `connectOverCDP` 连上真实 WebView2 窗口自动化点击走查。
+wry **不读** `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 环境变量（读源码确认：wry 自己
+拼 `additional_browser_args`，环境变量被 options 覆盖），必须走配置项。
+
+**T9-1 全链路通过（含 AI 工具实际触发）**：
+UI 新建技能「Vue3 · 虚拟列表优化」（探针词 `cb-e2e-probe-7391`）→ 保存落盘
+`knowledge/vue3.md`（158 字，Toast/字数/预览全对）→ 「立即同步」→ 三工具
+`crossbrain-vue3-aaee58` 全部落盘且含探针词 → **`codex debug prompt-input` 实证
+Codex 模型可见输入的技能清单含 `- vue3: Vue3 · 虚拟列表优化 (file: r0/crossbrain-vue3-aaee58/SKILL.md)`**。
+
+**T9-2 通过**：UI 删除（二次确认）→ 再同步 → 三工具 `crossbrain-vue3-aaee58`
+全部清理，知识库恢复空。
+
+**T10**：文件系统语义已由 `dryrun_sync` [13] 节在副本上覆盖（去痕 + 块外内容保留）；
+真机验证覆盖「卸载按钮 → 确认弹窗文案 → 取消路径」全程。**真机确认卸载属删除性操作，
+留待用户自行执行**（卸载后重新同步即可恢复，无不可逆损失——`~/.ai-profile` 用户数据不动）。
+
+**积压 GUI 走查（TASK-11/12/13/19）全部完成**：
+- TASK-11：编辑器渲染、预览、保存状态机 —— **发现并修复真实 BUG**（见实施修正）
+- TASK-12：新建/标题弹窗/编辑/字数/删除二次确认 —— 全对
+- TASK-13：状态栏同步后显示三工具结果行 + 上次同步时间；失败展开与离线红色化
+  需异常/断网条件，归 T7（TASK-16）
+- TASK-19：备份列表（Claude 1.9KB / Codex 0B 两条可还原）与还原弹窗渲染正常；
+  真机还原会移除当前标记块，留待用户执行
+
+**验证**：cargo test 136 passed / 0 failed；pnpm build 通过；真实数据零改动
+（rules.md md5 `f0b10675…` 不变、`~/.ai-memory` 硬链接组 links=4、knowledge 0 项、
+备份文件完好、无 crossbrain 残留）。
+
+#### ⚠️ 实施修正
+
+1. **【BUG 修复】MainView 从未调用 `ruleEditor.load()`**——「全局规则」页
+   永远停在「未读过磁盘」状态：编辑器显示空占位符、基线为 null、保存按钮禁用，
+   且界面上没有任何入口能触发 load()（错误态才显示重试按钮）。修复：
+   `onMounted` 里补 `void ruleEditor.load()`（`load()` 自带幂等：有基线直接返回）。
+   教训：`pnpm build` 与全部单测都发现不了这种「忘记接线」——只有真实窗口点开才暴露，
+   GUI 走查不可省。
+2. **Naive UI `n-tabs` 不渲染 `role="tab"`**：自动化选择器用 `.n-tabs-tab` + hasText。
+3. **知识卡片 title = 文件名去 `.md`**（如 `vue3`），标题首行进 summary；
+   删除按钮 aria-label 是「删除 vue3」——自动化按此定位。
+4. **同窗口有两个 `textarea` 并存**（`show:lazy` 常驻）——定位编辑器必须带
+   placeholder 约束，`locator("textarea")` 会 strict mode 冲突。
+5. **预览 HTML 转义实测通过**：注入 `<b onclick>` + `<img onerror>` 探针，
+   预览 DOM 无真实标签、`window.__pwned` 未执行——TASK-11 的安全红线在真实窗口复验。
 
 ### TASK-16：离线测试
 

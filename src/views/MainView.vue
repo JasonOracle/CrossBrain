@@ -155,6 +155,10 @@ onMounted(() => {
   window.addEventListener("online", updateOnline);
   window.addEventListener("offline", updateOnline);
   void loadBackups();
+  // 「全局规则」编辑器的首次读取：没有这一步，编辑器会一直停在
+  // 「未读过磁盘」状态——内容显示为空、基线为 null、保存按钮被禁用，
+  // 而界面上没有任何入口能触发 load()（TASK-15 走查发现的真实缺陷）
+  void ruleEditor.load();
 });
 
 // 切到「设置」时重新读一次：用户可能刚在别处同步过，

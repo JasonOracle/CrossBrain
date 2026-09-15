@@ -82,3 +82,14 @@
 - `os error 5/拒绝访问` = 句柄释放延迟（非杀软），`rm -rf target/debug/build/<crate>-*` 重试。
 - Edit 报 EBUSY → 直接重试，别改 Write。**同一文件禁止并行 Edit**（静默丢改）。
 - 沙箱 git 远端引用偶发不落盘（`git status` 显 `[gone]` 但 push 实际成功）→ 判断同步一律 `git ls-remote origin` 直连。
+
+## GUI 自动化走查（TASK-15 实证）
+
+- **WebView2 CDP**：`tauri.conf.json` 窗口项临时加
+  `additionalBrowserArgs`（默认三参数 + `--remote-debugging-port=9223`）→
+  Playwright `connectOverCDP`。**wry 不读 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`**
+  （options 覆盖环境变量）。用后必须还原配置。
+- `n-tabs` 无 `role="tab"`（用 `.n-tabs-tab`）；`show:lazy` 下两个 textarea 并存
+  （定位带 placeholder）；知识卡片 aria-label=`删除 {文件名去.md}`。
+- **GUI 走查不可省**：MainView 漏调 `load()` 这种「忘记接线」BUG，
+  单测/类型检查/干跑全绿也发现不了。
