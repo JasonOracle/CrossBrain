@@ -21,6 +21,15 @@ fn home_dir() -> PathBuf {
     dirs::home_dir().expect("无法获取系统 home 目录，这是一个致命错误")
 }
 
+/// 获取系统 home 目录（**只读探测用**）。
+///
+/// 目前唯一的使用方是「工具接入」扫描（TASK-21）：它要按已知的工具特征路径
+/// （`~/.cursor`、`~/.codebuddy` 等）逐个探测安装痕迹。其它模块一律走上面
+/// 各语义化路径函数——直接把 home 交出去容易重新长出散落的路径拼接。
+pub fn home() -> PathBuf {
+    home_dir()
+}
+
 /// 获取 `~/.ai-profile/` 根目录（SSOT 单一事实源根目录）。
 pub fn profile_root() -> PathBuf {
     home_dir().join(".ai-profile")

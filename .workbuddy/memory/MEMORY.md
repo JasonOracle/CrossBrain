@@ -93,3 +93,12 @@
   （定位带 placeholder）；知识卡片 aria-label=`删除 {文件名去.md}`。
 - **GUI 走查不可省**：MainView 漏调 `load()` 这种「忘记接线」BUG，
   单测/类型检查/干跑全绿也发现不了。
+
+## CDP 走查页面选择（TASK-21 实证）
+
+- `ctx.newPage()` 建的页面**没有 `__TAURI_INTERNALS__`**——Tauri 初始化脚本只
+  注入自己的 webview；普通页应用照常渲染但 invoke 全灭（假「无法启动」）。
+  走查脚本必须枚举 `ctx.pages()` 找带注入的原生页面；**不要关闭"多余"页面**
+  （可能就是真窗口页，关了窗口直接白屏）。
+- 同步范围已改为状态驱动（`state.selected_tools`，None=默认三全启用）；
+  干跑走 `run_for_tools` 注入层不受影响。

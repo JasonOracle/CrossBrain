@@ -19,29 +19,26 @@ import { useMessage } from "naive-ui";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import IconCheck from "~icons/lucide/check";
-import IconEraser from "~icons/lucide/eraser";
 import IconMinus from "~icons/lucide/minus";
-import IconRadar from "~icons/lucide/radar";
 import IconRefresh from "~icons/lucide/refresh-cw";
 import IconRotateCcw from "~icons/lucide/rotate-ccw";
+import IconScanSearch from "~icons/lucide/scan-search";
 import IconTrash from "~icons/lucide/trash";
 import IconWifiOff from "~icons/lucide/wifi-off";
 
 import {
-  detectTools,
   listBackups,
   onSyncProgress,
-  removeToolProbe,
   restoreBackup,
   runSync,
-  runToolProbe,
+  saveEnabledTools,
+  scanInstalledTools,
   toUserMessage,
   uninstallCrossbrain,
   type BackupInfo,
-  type ProbeOutcome,
+  type ScannedTool,
   type StartupState,
   type SyncReport,
-  type ToolInfo,
   type ToolSyncResult,
 } from "../api";
 import LinkNoticeDialog from "../components/LinkNoticeDialog.vue";
@@ -173,7 +170,6 @@ onMounted(() => {
 watch(activeTab, (tab) => {
   if (tab === "settings") {
     void loadBackups();
-    void loadProbeTools();
   }
 });
 
@@ -293,69 +289,113 @@ function formatSize(bytes: number): string {
 }
 
 // ============================================================================
-// 工具读取检测（探针）
+// 工具接入（TASK-21）：扫描本机工具 → 勾选 → 保存并立即同步
 // ============================================================================
 
-/** 支持的工具清单（复用向导的检测结果，含安装状态） */
-const probeTools = ref<ToolInfo[]>([]);
-const probeToolsLoaded = ref(false);
-/** 各工具的探针结论，键为 toolId；无键 = 还没测过 */
-const probeResults = ref<Record<string, ProbeOutcome>>({});
-/** 正在检测的工具（同时承担按钮 loading 与全局防重复） */
-const probingToolId = ref("");
-/** 正在移除探针的工具 */
-const removingProbeToolId = ref("");
+/** 扫描弹窗开关 */
+const scanOpen = ref(false);
+/** 扫描进行中（只读探测，通常瞬间完成） */
+const scanning = ref(false);
+/** 扫描结果（弹窗列表） */
+const scannedTools = ref<ScannedTool[]>([]);
+/** 扫描失败的用户可读原因（弹窗内展示） */
+const scanError = ref("");
+/** 弹窗里当前勾选的工具 id（含未适配工具的意愿勾选） */
+const checkedIds = ref<string[]>([]);
+/** 保存 + 同步进行中（同时承担按钮 loading 与防重复） */
+const savingTools = ref(false);
+/** 当前同步范围里的工具名（来自扫描结果或保存后的刷新） */
+const enabledNames = ref<string[]>([]);
 
-async function loadProbeTools() {
-  try {
-    probeTools.value = await detectTools();
-  } catch {
-    // 清单读不出来不阻断检测区——留空即可，用户重进设置页会再试
-    probeTools.value = [];
-  } finally {
-    probeToolsLoaded.value = true;
-  }
+/** 刷新「当前同步范围」展示：已适配且被勾选的工具名 */
+function refreshEnabledNames() {
+  enabledNames.value = scannedTools.value
+    .filter((t) => t.adapted && checkedIds.value.includes(t.toolId))
+    .map((t) => t.displayName);
 }
 
-async function startProbe(toolId: string) {
-  if (probingToolId.value) return;
-  probingToolId.value = toolId;
-  const next = { ...probeResults.value };
-  delete next[toolId];
-  probeResults.value = next;
+/** 点「扫描本机工具」：打开弹窗并做只读探测 */
+async function openScan() {
+  scanOpen.value = true;
+  // 已扫过就不再反复探测（结果缓存复用；弹窗里提供「重新扫描」）
+  if (scannedTools.value.length) return;
+  await runScan();
+}
 
+/** 弹窗里点「重新扫描」：清掉缓存结果后重新探测 */
+async function rescan() {
+  if (scanning.value || savingTools.value) return;
+  scannedTools.value = [];
+  await runScan();
+}
+
+async function runScan() {
+  scanning.value = true;
+  scanError.value = "";
   try {
-    const outcome = await runToolProbe(toolId);
-    probeResults.value = { ...probeResults.value, [toolId]: outcome };
+    scannedTools.value = await scanInstalledTools();
+    // 复选框初值 = 后端给出的「当前清单」（用户保存过的，或默认全选已适配）
+    checkedIds.value = scannedTools.value
+      .filter((t) => t.selected)
+      .map((t) => t.toolId);
   } catch (e) {
-    probeResults.value = {
-      ...probeResults.value,
-      [toolId]: {
-        toolId,
-        displayName: "",
-        status: "failed",
-        token: "",
-        message: toUserMessage(e),
-      },
-    };
+    scanError.value = toUserMessage(e);
   } finally {
-    probingToolId.value = "";
+    scanning.value = false;
   }
 }
 
-async function clearProbe(toolId: string) {
-  if (removingProbeToolId.value) return;
-  removingProbeToolId.value = toolId;
+/** 弹窗里的状态标签：未适配 / 未安装 / 已接入 */
+function toolTag(tool: ScannedTool): { text: string; type: "success" | "default" | "warning" } {
+  if (!tool.adapted) return { text: "暂不支持同步", type: "warning" };
+  if (!tool.installed) return { text: "未安装", type: "default" };
+  return { text: "已接入", type: "success" };
+}
+
+/** 弹窗复选框：勾/去勾一个工具 */
+function toggleChecked(toolId: string, checked: boolean) {
+  const next = new Set(checkedIds.value);
+  if (checked) {
+    next.add(toolId);
+  } else {
+    next.delete(toolId);
+  }
+  checkedIds.value = [...next];
+}
+
+/** 真正的保存 + 同步（已经过断链告知闸门） */
+async function doSaveTools() {
+  if (savingTools.value) return;
+  savingTools.value = true;
   try {
-    message.success(await removeToolProbe(toolId));
-    const next = { ...probeResults.value };
-    delete next[toolId];
-    probeResults.value = next;
+    const report = await saveEnabledTools([...checkedIds.value]);
+    // 与「立即同步」同一套权威结果处理：报告覆盖进度行，状态栏即时刷新
+    lines.value = report.tools;
+    lastSyncAt.value = currentLocalTime();
+    lastSyncOk.value = report.ok;
+    showSyncFailure.value = false;
+    errorText.value = report.error ?? "";
+    // 新接入的工具可能刚产生了备份，顺手刷新备份区
+    void loadBackups();
+    refreshEnabledNames();
+    scanOpen.value = false;
+    message.success(
+      report.ok
+        ? "已保存工具选择，同步完成。"
+        : "已保存工具选择，但同步存在失败项，详情见顶部状态栏。",
+    );
   } catch (e) {
     message.error(toUserMessage(e));
   } finally {
-    removingProbeToolId.value = "";
+    savingTools.value = false;
   }
+}
+
+/** 弹窗里点「保存并同步」——首次写入也要先过断链告知闸门（ADR-15） */
+function confirmSaveTools() {
+  linkNotice.guard(() => {
+    void doSaveTools();
+  });
 }
 
 /**
@@ -559,73 +599,38 @@ function currentLocalTime(): string {
             </n-alert>
           </section>
 
-          <!-- ── 工具读取检测（探针）：验证各工具真的读到了推送的内容 ── -->
+          <!-- ── 工具接入（TASK-21）：扫描本机工具，勾选后加入同步范围 ── -->
           <section class="mt-8 flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4">
-            <div>
-              <h2 class="text-base font-medium text-neutral-900">工具读取检测</h2>
-              <p class="mt-1 text-sm leading-6 text-neutral-500">
-                向各工具写入一条临时的「探针」技能，验证它们真的能读到 CrossBrain
-                推送的内容。Codex 会自动给出结论；其它工具需要你到工具里问一句确认。
-                探针看完即可移除，下次「立即同步」也会自动清理。
-              </p>
-            </div>
-
-            <div v-if="!probeToolsLoaded" class="text-sm text-neutral-500">
-              正在读取工具信息……
-            </div>
-
-            <div v-else class="flex flex-col gap-2">
-              <div
-                v-for="tool in probeTools"
-                :key="tool.toolId"
-                class="flex items-start justify-between gap-4 rounded-lg border border-neutral-100 bg-neutral-50 px-4 py-3"
-              >
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-sm font-medium text-neutral-900">
-                      {{ tool.displayName }}
-                    </span>
-                    <n-tag v-if="!tool.installed" size="small" :bordered="false">未安装</n-tag>
-                  </div>
-                  <p
-                    v-if="probeResults[tool.toolId]"
-                    class="mt-1 text-xs leading-5"
-                    :class="
-                      probeResults[tool.toolId].status === 'failed'
-                        ? 'text-error-500'
-                        : 'text-neutral-600'
-                    "
-                  >
-                    {{ probeResults[tool.toolId].message }}
-                  </p>
-                </div>
-
-                <div class="flex shrink-0 items-center gap-2">
-                  <n-button
-                    size="small"
-                    :loading="probingToolId === tool.toolId"
-                    :disabled="!tool.installed || probingToolId !== ''"
-                    @click="startProbe(tool.toolId)"
-                  >
-                    <template #icon>
-                      <IconRadar v-if="probingToolId !== tool.toolId" class="h-4 w-4" aria-hidden="true" />
-                    </template>
-                    检测
-                  </n-button>
-                  <n-button
-                    v-if="probeResults[tool.toolId] && probeResults[tool.toolId].status !== 'verified'"
-                    size="small"
-                    quaternary
-                    :loading="removingProbeToolId === tool.toolId"
-                    @click="clearProbe(tool.toolId)"
-                  >
-                    <template #icon>
-                      <IconEraser class="h-4 w-4" aria-hidden="true" />
-                    </template>
-                    移除探针
-                  </n-button>
-                </div>
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0">
+                <h2 class="text-base font-medium text-neutral-900">工具接入</h2>
+                <p class="mt-1 text-sm leading-6 text-neutral-500">
+                  扫描本机的编程工具，勾选后加入 CrossBrain 的同步范围。
+                  尚未支持的工具也可以先登记意愿，等支持后即可接入。
+                </p>
               </div>
+
+              <n-button type="primary" secondary @click="openScan">
+                <template #icon>
+                  <IconScanSearch class="h-4 w-4" aria-hidden="true" />
+                </template>
+                扫描本机工具
+              </n-button>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              <span class="text-neutral-500">当前同步范围：</span>
+              <n-tag
+                v-for="name in enabledNames"
+                :key="name"
+                size="small"
+                :bordered="false"
+              >
+                {{ name }}
+              </n-tag>
+              <span v-if="!enabledNames.length" class="text-neutral-400">
+                尚未扫描，默认同步所有已支持的工具
+              </span>
             </div>
           </section>
 
@@ -722,6 +727,87 @@ function currentLocalTime(): string {
           <n-button :disabled="uninstalling" @click="cancelUninstall">取消</n-button>
           <n-button type="error" :loading="uninstalling" @click="confirmUninstall">
             确认卸载
+          </n-button>
+        </div>
+      </template>
+    </n-modal>
+
+    <!-- 扫描本机工具（TASK-21）：只读探测 → 勾选 → 保存并立即同步 -->
+    <n-modal
+      :show="scanOpen"
+      preset="card"
+      style="width: 560px"
+      title="扫描本机工具"
+      :mask-closable="!savingTools"
+      @update:show="(v: boolean) => !savingTools && (scanOpen = v)"
+    >
+      <div class="flex flex-col gap-3">
+        <div v-if="scanning" class="flex items-center gap-3 py-6 text-sm text-neutral-500">
+          <n-spin size="small" />
+          正在扫描本机的编程工具……
+        </div>
+
+        <template v-else>
+          <n-alert v-if="scanError" type="error" :bordered="false">
+            {{ scanError }}
+          </n-alert>
+
+          <p v-else-if="!scannedTools.length" class="py-6 text-center text-sm text-neutral-500">
+            没有发现任何工具的安装痕迹。
+          </p>
+
+          <div v-else class="flex flex-col gap-1.5">
+            <label
+              v-for="tool in scannedTools"
+              :key="tool.toolId"
+              class="flex items-center gap-3 rounded-lg border border-neutral-100 bg-neutral-50 px-4 py-2.5"
+              :class="tool.adapted && !tool.installed ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'"
+            >
+              <n-checkbox
+                :checked="checkedIds.includes(tool.toolId)"
+                :disabled="tool.adapted && !tool.installed"
+                @update:checked="(v: boolean) => toggleChecked(tool.toolId, v)"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="flex flex-wrap items-center gap-2">
+                  <span class="text-sm font-medium text-neutral-900">
+                    {{ tool.displayName }}
+                  </span>
+                  <n-tag size="small" :bordered="false" :type="toolTag(tool).type">
+                    {{ toolTag(tool).text }}
+                  </n-tag>
+                </span>
+                <span class="block text-xs text-neutral-400">{{ tool.pushPath }}</span>
+              </span>
+            </label>
+          </div>
+
+          <p class="text-xs leading-5 text-neutral-500">
+            点「保存并同步」后，CrossBrain 会立即向新选中的工具写入全局规则与技能
+            （你原有的文件会先自动备份）；取消勾选的工具不再参与同步，已写入的内容保持不变。
+            标「暂不支持同步」的工具只会记录你的接入意愿。
+          </p>
+        </template>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <n-button :disabled="savingTools" @click="scanOpen = false">取消</n-button>
+          <n-button
+            v-if="!scanning && scannedTools.length"
+            quaternary
+            :disabled="savingTools"
+            @click="rescan"
+          >
+            重新扫描
+          </n-button>
+          <n-button
+            type="primary"
+            :loading="savingTools"
+            :disabled="scanning || !!scanError"
+            @click="confirmSaveTools"
+          >
+            保存并同步
           </n-button>
         </div>
       </template>

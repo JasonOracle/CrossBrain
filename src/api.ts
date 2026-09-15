@@ -245,35 +245,38 @@ export function onSyncProgress(
   return listen<ToolSyncResult>("sync://progress", (event) => handler(event.payload));
 }
 
-// ── 探针检测（增补任务：验证工具真的读到了 CrossBrain 的内容）──
+// ── 工具扫描与接入（TASK-21）──
 
-/** 探针结果状态。 */
-export type ProbeStatus = "verified" | "needsManual" | "failed";
-
-/** 单个工具的探针结果。 */
-export interface ProbeOutcome {
+/** 扫描结果的一行（「工具接入」弹窗）。 */
+export interface ScannedTool {
   toolId: string;
   displayName: string;
-  status: ProbeStatus;
-  /** 本次探针的唯一标记（`cb-probe-<时间戳>`），人工验证时用它对答案 */
-  token: string;
-  /** 面向用户的说明 */
-  message: string;
+  /** 特征路径存在 = 已安装 */
+  installed: boolean;
+  /** 有完整适配器 = 勾选保存后真的参与同步 */
+  adapted: boolean;
+  /** 复选框初值：用户当前保存（或默认）清单里的工具 */
+  selected: boolean;
+  /** 展示用落点（`~/.cursor` 形态） */
+  pushPath: string;
 }
 
 /**
- * 对一个工具执行探针检测：往它的技能目录写一条临时探针技能，
- * 能自动取证的（Codex）直接给出结论。
- *
- * Codex 侧会真实启动它的检测命令（最长约 30 秒），按钮会转圈，属正常现象。
+ * 扫描本机已安装的编程工具。**纯只读**：只探测已知特征路径，
+ * 不写任何文件。
  */
-export function runToolProbe(toolId: string): Promise<ProbeOutcome> {
-  return invoke<ProbeOutcome>("run_tool_probe", { toolId });
+export function scanInstalledTools(): Promise<ScannedTool[]> {
+  return invoke<ScannedTool[]>("scan_installed_tools");
 }
 
-/** 移除一个工具的探针（幂等：本来没有就说明无需清理）。 */
-export function removeToolProbe(toolId: string): Promise<string> {
-  return invoke<string>("remove_tool_probe", { toolId });
+/**
+ * 保存勾选的工具清单，并**立即按新范围执行一次完整同步**。
+ *
+ * 新接入的工具当场收到全局规则与技能（原文件自动备份）——
+ * 调用前 UI 必须已经向用户预告过这一行为。
+ */
+export function saveEnabledTools(toolIds: string[]): Promise<SyncReport> {
+  return invoke<SyncReport>("save_enabled_tools", { toolIds });
 }
 
 // ============================================================================

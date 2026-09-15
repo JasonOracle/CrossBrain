@@ -2873,7 +2873,7 @@ cd .. && pnpm build         # vue-tsc --noEmit + vite build 零报错
 
 ---
 
-## TASK-20：探针检测——验证工具真的读到了 CrossBrain 的内容（2026-09-15 增补）
+## TASK-20：探针检测——验证工具真的读到了 CrossBrain 的内容（2026-09-15 增补；**⚠️ UI 已于同日被 TASK-21 替换移除**，但其设计要点仍有效）
 
 > **增补任务。** 触发：用户看到应用只支持 Claude Code / Codex（实际是三个，
 > Antigravity 在列表中），追问其它工具何时接入。讨论中确认：项目铁律
@@ -2931,3 +2931,65 @@ cd .. && pnpm build         # vue-tsc --noEmit + vite build 零报错
   与其它技能零改动。
 - 边界说明：Codex 的自动取证依赖其命令行在系统 PATH 中；打包版（TASK-17）
   若 PATH 不含 codex，会走 `NeedsManual` 分支并给出人工指引，不算失败。
+
+---
+
+## TASK-21：工具接入——扫描本机工具 + 勾选加入同步范围（2026-09-15 增补）
+
+> **增补任务。** 触发：用户对 TASK-20 的逐个检测提出产品级重构想法——
+> 「全部扫描 → 弹窗列出所有可支持的编程工具 → 左侧复选框选中 → 保存加入」。
+> 经确认三项决策：①未适配工具全部列出、置灰登记意愿；②保存即同步（弹窗预告）；
+> ③探针 UI 移除，由扫描接入取代。
+
+### 功能定义
+
+1. **扫描**（纯只读）：设置页「工具接入」区新增「扫描本机工具」按钮 →
+   弹窗按已知特征路径（`SCAN_CATALOG`，10 个工具：已适配 3 + Spike 预探测 7）
+   探测安装痕迹，逐行列出名称 / 状态标签 / 落点（`~/.cursor` 形态）。
+2. **勾选**：已适配且已安装的可勾选；未适配的勾选只做**意愿记录**
+   （存状态文件，作为后续适配优先级依据，绝不同步）；未安装的已适配工具禁用。
+   弹窗初值 = 用户上次保存的清单（从未保存过 = 默认三个已适配全选，与真实同步行为一致）。
+3. **保存并同步**：先过断链告知闸门（ADR-15 `linkNotice.guard`）→
+   `save_enabled_tools` 命令：校验（未知 id 拒绝、去重保序）→ 写状态 →
+   **立即按新范围执行一次完整同步**（复用 `run_full_sync_with_progress`，
+   它每次现读状态；进度事件与「立即同步」共用同一通道）→ 状态栏/备份区同步刷新。
+
+### ⚠️ 实施修正（2026-09-15）
+
+1. **同步范围必须由状态驱动，而不是把 `build_tools()` 写死在 `run_full_sync_with_progress`**。
+   新增 `filter_tools_with(tools, selected)`：`None`（从未做过选择）= 全保留——
+   这个默认语义让**旧状态文件零迁移**；`Some(list)` 过滤，未适配 id 自然丢弃
+   （`build_tools()` 只造得出已适配 Adapter，意愿与同步范围是两个层面）。
+2. **卸载范围刻意保持全量**（三个已适配工具都清，不看启用集合）：只碰
+   `crossbrain-` 命名空间与标记块，幂等且对未启用工具是空操作；按启用集合收缩
+   反而会在「禁用后忘删」时留下痕迹，违背去痕承诺。
+3. **状态文件必须用 `#[serde(default)]` + `Option`**：老用户没做过扫描时
+   `selected_tools = None` = 「三个全启用」。若把默认值写成空列表，会把
+   「没选过」误判成「一个都没选」，同步直接静默变空。
+4. **探针移除是删 UI/命令/测试，保留 `skills_root()` 与
+   `remove_crossbrain_skill_dir()`**：它们是语义正确的 trait 方法与工具函数，
+   将来「接入后自动验证」复用，删除只会造成无谓的 churn。
+5. **弹窗必须走原生页面**（GUI 走查实证）：CDP `newPage()` 建的页面**没有
+   `__TAURI_INTERNALS__` 注入**——Tauri 的初始化脚本只注入它自己的 webview。
+   在普通 CDP 页里应用代码照常渲染，但 invoke 全部失败，显示「无法启动」。
+   走查脚本必须先找带 `__TAURI_INTERNALS__` 的页面再操作。
+
+### ✅ 实施记录（2026-09-15）
+
+- 后端：`state.rs`（`selected_tools: Option<Vec<String>>` + `mark_selected_tools`）、
+  `sync.rs`（`SCAN_CATALOG` 10 工具 / `ScannedTool` / `scan_installed_tools(_in)` /
+  `normalize_selection` / `filter_tools_with` / `save_enabled_tools_and_sync`）、
+  `paths.rs`（`home()` 只读探测用出口）、`commands.rs` + `lib.rs`
+  （`scan_installed_tools`、`save_enabled_tools`，后者走 `spawn_blocking` + 进度事件）。
+- 前端：`api.ts`（`ScannedTool` + 两个封装）、`MainView.vue` 设置页
+  「工具接入」区（当前同步范围 chips）+ 扫描弹窗（复选框 / 状态标签 / 保存预告 /
+  重新扫描 / 保存进度）。
+- 测试：cargo test **142 passed / 0 failed**（+1 状态往返、+4 扫描/规范化/过滤单测，
+  探针的 4 单测 + 1 契约测试移除，新增 `tools_scan_wiring_matches`——含
+  **探针零残留反向断言**）；`pnpm build` 通过；干跑 13 节 0 未通过。
+- **真机 GUI 走查 11/11 通过**（CDP 驱动真实窗口）：弹窗 10 工具、
+  已接入标签与勾选、未适配置灰可登记、勾选/取消交互、取消关闭不保存。
+  走查全程真实数据零改动（状态文件 md5 前后一致、rules.md `f0b10675…` 不变、
+  硬链接组 links=4）。
+- 遗留：保存→自动同步的**真实触发路径**未在真机点击（会写用户文件），
+  由单测 + 干跑 + 契约断言覆盖；用户首次使用时即是一次真机验收。

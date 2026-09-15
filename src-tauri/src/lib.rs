@@ -33,8 +33,8 @@ pub fn run() {
             commands::save_knowledge,
             commands::delete_knowledge,
             commands::uninstall_crossbrain,
-            commands::run_tool_probe,
-            commands::remove_tool_probe,
+            commands::scan_installed_tools,
+            commands::save_enabled_tools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

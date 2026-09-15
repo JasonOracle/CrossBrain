@@ -494,34 +494,56 @@ fn uninstall_requires_confirmation_and_wiring_matches() {
 }
 
 // ============================================================================
-// 探针检测（增补任务）
+// 工具扫描与接入（TASK-21）
 // ============================================================================
 
-/// 探针功能的前后端契约：
+/// 「工具接入」的前后端契约：
 /// - api.ts 的命令名与结果类型必须与后端对齐（断言完整调用形态，防变体误报）；
 /// - lib.rs 必须真的注册了两条命令——漏注册 = 前端调用运行时落空；
-/// - 设置页必须真的接了「检测」与「移除探针」两个入口。
+/// - 设置页必须真的接了「扫描」与「保存并同步」入口；
+/// - 探针（TASK-20，已被本功能替换）不得留有任何残迹——
+///   命令没注册时前端若还在调用，运行时才会爆，比编译期难查得多。
 #[test]
-fn probe_wiring_matches() {
+fn tools_scan_wiring_matches() {
     let api = strip_line_comments(&repo_file("src/api.ts"));
     assert!(
-        api.contains(r#"invoke<ProbeOutcome>("run_tool_probe", { toolId })"#),
-        "api.ts 的探针命令名或结果类型与后端对不上"
+        api.contains(r#"invoke<ScannedTool[]>("scan_installed_tools")"#),
+        "api.ts 的扫描命令名或结果类型与后端对不上"
     );
     assert!(
-        api.contains(r#"invoke<string>("remove_tool_probe", { toolId })"#),
-        "api.ts 的探针移除命令名与后端对不上"
+        api.contains(r#"invoke<SyncReport>("save_enabled_tools", { toolIds })"#),
+        "api.ts 的保存命令名或参数名与后端对不上"
+    );
+    assert!(
+        !api.contains("run_tool_probe") && !api.contains("remove_tool_probe"),
+        "探针命令已被「工具接入」替换，api.ts 里不应再有调用"
     );
 
     let lib = strip_line_comments(&repo_file("src-tauri/src/lib.rs"));
     assert!(
-        lib.contains("commands::run_tool_probe") && lib.contains("commands::remove_tool_probe"),
-        "探针命令没有注册进 invoke_handler——前端调用会在运行时落空"
+        lib.contains("commands::scan_installed_tools")
+            && lib.contains("commands::save_enabled_tools"),
+        "扫描/保存命令没有注册进 invoke_handler——前端调用会在运行时落空"
+    );
+    assert!(
+        !lib.contains("run_tool_probe"),
+        "探针命令的注册残留会让「已删除的功能」仍然可达"
     );
 
     let main_view = strip_line_comments(&repo_file("src/views/MainView.vue"));
     assert!(
-        main_view.contains("startProbe") && main_view.contains("clearProbe"),
-        "设置页缺少探针的检测/移除入口"
+        main_view.contains("openScan") && main_view.contains("confirmSaveTools"),
+        "设置页缺少扫描入口或保存并同步入口"
+    );
+    assert!(
+        main_view.contains("linkNotice.guard"),
+        "「保存并同步」会触发首次写入，必须先过断链告知闸门（ADR-15）"
+    );
+
+    // 同步范围必须真的由用户选择驱动：生产同步入口要现读状态过滤
+    let sync_rs = strip_line_comments(&repo_file("src-tauri/src/sync.rs"));
+    assert!(
+        sync_rs.contains("filter_tools_with(build_tools(),"),
+        "run_full_sync_with_progress 必须按用户保存的工具清单过滤同步范围"
     );
 }

@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::adapters::{format_skill_md, remove_crossbrain_skill_dir, Adapter, AdapterError};
+use crate::adapters::{format_skill_md, Adapter, AdapterError};
 use crate::adapters::antigravity::AntigravityAdapter;
 use crate::adapters::claude_code::ClaudeCodeAdapter;
 use crate::adapters::codex::CodexAdapter;
@@ -478,242 +478,131 @@ fn format_local_time(time: std::time::SystemTime) -> String {
 }
 
 // ============================================================================
-// 探针检测（增补任务：验证工具真的读到了 CrossBrain 的内容）
+// 工具扫描与接入（TASK-21）
 // ============================================================================
 
-/// 探针技能的固定目录名。
-///
-/// 走 [`Adapter::sync_l2`] 写入（过命名空间校验、落在各工具自己的技能目录），
-/// 因此天然被三道既有机制覆盖：下次同步的孤儿清理会删它、卸载会删它、
-/// 用户手动「移除探针」也能删它——探针永远不会变成滞留垃圾。
-pub const PROBE_SLUG: &str = "crossbrain-probe";
+/// 已适配工具的稳定 id 清单（顺序即 UI 展示顺序）。
+pub const ADAPTED_TOOL_IDS: [&str; 3] = ["claude_code", "antigravity", "codex"];
 
-/// 探针结果状态。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ProbeStatus {
-    /// 自动验证通过——工具读取的内容里确实出现了探针标记
-    Verified,
-    /// 探针已写入，但该工具没有可自动取证的命令，需要用户人工确认
-    NeedsManual,
-    /// 写入失败，或自动取证明确判定「没读到」
-    Failed,
+/// 扫描目录的一个条目：本机可能安装的编程工具 + 它的 home 相对特征路径。
+struct ScanEntry {
+    id: &'static str,
+    name: &'static str,
+    /// 特征路径（相对 home）。存在即视为「已安装」。
+    detect_rel: &'static str,
+    /// 是否已有完整 Adapter（勾选保存后真的参与同步）。
+    adapted: bool,
 }
 
-/// 单个工具的探针结果（设置页「工具读取检测」区展示）。
+/// 扫描目录清单。
+///
+/// 前三项是已适配工具；其余是 2026-09-14 Spike 预探测过的工具
+/// （`docs/testing/SPIKE_RESULTS.md`）：能发现安装痕迹，但落点形态未经验证，
+/// 按铁律「接入必先探针验证」**不得直接写入**——勾选它们只做意愿记录
+/// （存进状态文件），作为后续适配的优先级依据。探测是纯只读的。
+const SCAN_CATALOG: [ScanEntry; 10] = [
+    ScanEntry { id: "claude_code", name: "Claude Code", detect_rel: ".claude", adapted: true },
+    ScanEntry { id: "antigravity", name: "Antigravity IDE", detect_rel: ".gemini", adapted: true },
+    ScanEntry { id: "codex", name: "Codex", detect_rel: ".codex", adapted: true },
+    ScanEntry { id: "opencode", name: "OpenCode", detect_rel: ".config/opencode", adapted: false },
+    ScanEntry { id: "codebuddy", name: "CodeBuddy", detect_rel: ".codebuddy", adapted: false },
+    ScanEntry { id: "workbuddy", name: "WorkBuddy", detect_rel: ".workbuddy", adapted: false },
+    ScanEntry { id: "cursor", name: "Cursor", detect_rel: ".cursor", adapted: false },
+    ScanEntry { id: "trae", name: "Trae", detect_rel: ".trae", adapted: false },
+    ScanEntry { id: "zcode", name: "ZCode", detect_rel: ".zcode", adapted: false },
+    ScanEntry { id: "qoder", name: "Qoder", detect_rel: ".qoder", adapted: false },
+];
+
+/// 扫描结果的一行（设置页「工具接入」弹窗展示）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProbeOutcome {
+pub struct ScannedTool {
     pub tool_id: String,
     pub display_name: String,
-    pub status: ProbeStatus,
-    /// 本次探针的唯一标记（`cb-probe-<时间戳>`），人工验证时用它对答案
-    pub token: String,
-    /// 面向用户的说明（不含系统错误码与技术路径）
-    pub message: String,
+    /// 特征路径存在 = 已安装
+    pub installed: bool,
+    /// 有完整适配器 = 勾选保存后真的参与同步
+    pub adapted: bool,
+    /// 是否在用户当前保存（或默认）的清单里——弹窗里的复选框初值
+    pub selected: bool,
+    /// 展示用落点（`~/.cursor` 形态；不含系统盘符）
+    pub push_path: String,
 }
 
-/// 对一个工具执行探针检测（生产入口）。
-pub fn run_tool_probe(tool_id: &str) -> ProbeOutcome {
-    run_tool_probe_for(&build_tools(), tool_id)
+/// 扫描本机已安装的编程工具（生产入口）。**纯只读**，不写任何文件。
+pub fn scan_installed_tools() -> Vec<ScannedTool> {
+    let selected = crate::state::load().selected_tools;
+    scan_installed_tools_in(&paths::home(), selected.as_deref())
 }
 
-/// [`run_tool_probe`] 的可注入变体：由调用方提供工具清单（测试用临时目录）。
-///
-/// 流程：写入探针技能 → （能自动取证的）运行工具自带命令验证 →
-/// 产出结论。探针写入失败绝不波及其它文件——`sync_l2` 只碰
-/// `crossbrain-` 命名空间内的一个新目录。
-pub fn run_tool_probe_for(tools: &[ToolDescriptor], tool_id: &str) -> ProbeOutcome {
-    let outcome = |display_name: &str, status: ProbeStatus, token: &str, message: String| {
-        ProbeOutcome {
-            tool_id: tool_id.to_string(),
-            display_name: display_name.to_string(),
-            status,
-            token: token.to_string(),
-            message,
-        }
-    };
-
-    let Some(tool) = tools.iter().find(|t| t.tool_id == tool_id) else {
-        return outcome(tool_id, ProbeStatus::Failed, "", "未知工具".to_string());
-    };
-
-    match tool.adapter.detect() {
-        Ok(false) => {
-            return outcome(
-                tool.display_name,
-                ProbeStatus::Failed,
-                "",
-                "未检测到此工具，无法检测。".to_string(),
-            )
-        }
-        Err(e) => {
-            return outcome(
-                tool.display_name,
-                ProbeStatus::Failed,
-                "",
-                user_facing_error(&*tool.adapter, &e),
-            )
-        }
-        Ok(true) => {}
-    }
-
-    let token = format!("cb-probe-{}", chrono::Utc::now().timestamp());
-    let body = format!(
-        "# 连通性探针 {token}\n\nCrossBrain 写入的临时检测技能，\
-用于确认本工具能否读到共享内容。验证完成后即可删除。"
-    );
-    let content = format_skill_md(PROBE_SLUG, &body);
-
-    if let Err(e) = tool.adapter.sync_l2(PROBE_SLUG, &content) {
-        return outcome(
-            tool.display_name,
-            ProbeStatus::Failed,
-            "",
-            user_facing_error(&*tool.adapter, &e),
-        );
-    }
-
-    // Codex 有官方取证命令（TASK-18 Spike 实证）：把「发给模型的完整输入」
-    // 打出来，探针标记在不在里面一目了然。其它工具没有等价命令，转人工。
-    if tool.tool_id == "codex" {
-        return match verify_codex_probe(&token) {
-            Ok(true) => {
-                // 结论已拿到，探针当场清理；清不掉也无妨（下次同步/卸载兜底）
-                let _ = remove_crossbrain_skill_dir(&tool.adapter.skills_root(), PROBE_SLUG);
-                outcome(
-                    tool.display_name,
-                    ProbeStatus::Verified,
-                    &token,
-                    format!(
-                        "检测通过：{0} 能看到 CrossBrain 写入的内容（标记 {token}）。探针已自动清理。",
-                        tool.display_name
-                    ),
-                )
-            }
-            Ok(false) => outcome(
-                tool.display_name,
-                ProbeStatus::Failed,
-                &token,
-                format!(
-                    "{0} 已运行，但没有在它读取的内容里发现探针标记（{token}）。\
-请人工确认后点「移除探针」清理。",
-                    tool.display_name
-                ),
-            ),
-            Err(reason) => outcome(
-                tool.display_name,
-                ProbeStatus::NeedsManual,
-                &token,
-                format!(
-                    "{reason}。探针已写入，请打开 {0} 问一句\
-「列出你可用的技能」，看到 crossbrain-probe（标记 {token}）即读取正常；\
-看完点「移除探针」清理。",
-                    tool.display_name
-                ),
-            ),
-        };
-    }
-
-    outcome(
-        tool.display_name,
-        ProbeStatus::NeedsManual,
-        &token,
-        format!(
-            "探针已写入。请打开 {0} 问一句「列出你可用的技能」，\
-若列表里出现 crossbrain-probe（标记 {token}），说明读取正常。\
-看完点「移除探针」清理；下次「立即同步」也会自动清掉它。",
-            tool.display_name
-        ),
-    )
-}
-
-/// 移除一个工具的探针（生产入口）。
-pub fn remove_tool_probe(tool_id: &str) -> Result<String, String> {
-    remove_tool_probe_for(&build_tools(), tool_id)
-}
-
-/// [`remove_tool_probe`] 的可注入变体（测试用临时目录）。
-///
-/// 不要求工具已安装：目录不存在时返回「无需清理」——幂等。
-pub fn remove_tool_probe_for(tools: &[ToolDescriptor], tool_id: &str) -> Result<String, String> {
-    let tool = tools
+/// [`scan_installed_tools`] 的可注入变体（测试传临时 home 与假想选择清单）。
+pub fn scan_installed_tools_in(home: &Path, selected: Option<&[String]>) -> Vec<ScannedTool> {
+    SCAN_CATALOG
         .iter()
-        .find(|t| t.tool_id == tool_id)
-        .ok_or_else(|| "未知工具".to_string())?;
-
-    match remove_crossbrain_skill_dir(&tool.adapter.skills_root(), PROBE_SLUG) {
-        Ok(true) => Ok(format!("已移除 {} 的探针。", tool.display_name)),
-        Ok(false) => Ok("没有找到探针，无需清理。".to_string()),
-        Err(e) => Err(user_facing_error(&*tool.adapter, &e)),
-    }
+        .map(|entry| {
+            let installed = home.join(entry.detect_rel).exists();
+            // 用户从未用过扫描（None）时，已适配工具按「默认接入」展示为已选——
+            // 与实际同步行为（三个全跑）一致，弹窗里看到的和真实发生的是一件事
+            let selected = match selected {
+                None => entry.adapted,
+                Some(list) => list.iter().any(|id| id == entry.id),
+            };
+            ScannedTool {
+                tool_id: entry.id.to_string(),
+                display_name: entry.name.to_string(),
+                installed,
+                adapted: entry.adapted,
+                selected,
+                // 展示约定统一正斜杠（~/.cursor），与向导、文档里的写法一致
+                push_path: format!("~/{rel}", rel = entry.detect_rel),
+            }
+        })
+        .collect()
 }
 
-/// 用 Codex 自带的调试命令验证探针是否进入模型可见输入。
+/// 校验并规范化用户勾选的工具清单（保存的**第一步**，先于任何状态写入）。
 ///
-/// `codex debug prompt-input` 把「发给模型的完整输入」打到 stdout——
-/// 这是**读取事实**的取证（Spike E 实证过），比人工对话更硬。
-/// 必须在**中立目录**运行（不能在用户项目里跑，避免额外上下文干扰）。
-///
-/// - `Ok(true)`：标记出现了，读取正常
-/// - `Ok(false)`：命令正常结束但标记没出现——判定「没读到」
-/// - `Err(原因)`：无法自动判定（启动失败 / 超时），转人工
-fn verify_codex_probe(token: &str) -> Result<bool, String> {
-    use std::process::Command;
-    use std::time::{Duration, Instant};
-
-    // stdout/stderr 各落到临时文件而不是管道：管道写满会让子进程卡死，
-    // 而文件随写随有，超时强杀后仍然能拿已产出的部分来判定
-    let temp = std::env::temp_dir();
-    let out_file = temp.join(format!("{token}-stdout.txt"));
-    let err_file = temp.join(format!("{token}-stderr.txt"));
-
-    let spawn = Command::new("codex")
-        .args(["debug", "prompt-input", "请列出你可用的技能"])
-        .current_dir(&temp)
-        .stdout(std::fs::File::create(&out_file).map_err(|_| "无法创建检测临时文件".to_string())?)
-        .stderr(std::fs::File::create(&err_file).map_err(|_| "无法创建检测临时文件".to_string())?)
-        .spawn();
-
-    let mut child = match spawn {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err("无法启动 Codex 命令行（可能未安装或不在系统路径）".to_string())
+/// 未知 id 直接拒绝——状态文件里的清单必须能对上扫描目录，
+/// 否则将来加工具时旧清单里的脏 id 会让排查变成猜谜。保序去重。
+pub fn normalize_selection(ids: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in ids {
+        if !SCAN_CATALOG.iter().any(|e| e.id == id) {
+            return Err(format!("「{id}」不是可识别的工具，请重新扫描后再保存。"));
         }
-        Err(_) => return Err("无法启动 Codex 命令行".to_string()),
-    };
-
-    // 最长等 30 秒。debug 命令通常秒回，超时基本等于环境有问题
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let timed_out = loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break false,
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break true;
-                }
-                std::thread::sleep(Duration::from_millis(200));
-            }
-            Err(_) => {
-                let _ = std::fs::remove_file(&out_file);
-                let _ = std::fs::remove_file(&err_file);
-                return Err("检测过程出现异常".to_string());
-            }
+        if !out.contains(id) {
+            out.push(id.clone());
         }
-    };
-
-    let stdout = std::fs::read_to_string(&out_file).unwrap_or_default();
-    let stderr = std::fs::read_to_string(&err_file).unwrap_or_default();
-    let _ = std::fs::remove_file(&out_file);
-    let _ = std::fs::remove_file(&err_file);
-
-    let found = stdout.contains(token) || stderr.contains(token);
-    if timed_out && !found {
-        return Err("Codex 检测超时".to_string());
     }
-    Ok(found)
+    Ok(out)
+}
+
+/// 按选择清单过滤参与同步的工具（None = 未做过选择 → 全部保留）。
+///
+/// 选择清单里的未适配 id 在这里自然被丢弃：`build_tools()` 只造得出已适配的
+/// Adapter，意愿记录保存在状态文件里，与同步范围是两个层面。
+fn filter_tools_with(tools: Vec<ToolDescriptor>, selected: Option<&[String]>) -> Vec<ToolDescriptor> {
+    let Some(list) = selected else { return tools };
+    tools
+        .into_iter()
+        .filter(|t| list.iter().any(|id| id == t.tool_id))
+        .collect()
+}
+
+/// 保存用户勾选的工具清单，并**立即按新范围执行一次完整同步**（生产入口）。
+///
+/// 「保存即同步」是这个功能的设计决定（弹窗里已向用户预告首次写入行为）：
+/// 新接入的工具当场拿到全局规则与技能，用户不用再自己找一次「立即同步」。
+/// 同步走 [`run_full_sync_with_progress`]——它每次现读状态，天然用上新清单；
+/// 断链告知、备份等既有安全机制全部原样生效。
+pub fn save_enabled_tools_and_sync(
+    ids: &[String],
+    on_progress: &mut dyn FnMut(ToolSyncResult),
+) -> Result<SyncReport, String> {
+    let normalized = normalize_selection(ids)?;
+    crate::state::mark_selected_tools(normalized)
+        .map_err(|e| format!("无法保存工具选择：{e}"))?;
+    Ok(run_full_sync_with_progress(on_progress))
 }
 
 // ============================================================================
@@ -971,8 +860,15 @@ pub fn run_full_sync_with_progress(on_progress: &mut dyn FnMut(ToolSyncResult)) 
         Err(msg) => return aborted(msg),
     };
 
-    // ── Step 2/3. 逐个工具同步 ──
-    run_for_tools(&build_tools(), &rules, &knowledge, on_progress)
+    // ── Step 2/3. 逐个工具同步（范围 = 用户在「工具接入」里保存的清单，
+    //    从未保存过则默认三个已适配工具全跑）──
+    let selected = crate::state::load().selected_tools;
+    run_for_tools(
+        &filter_tools_with(build_tools(), selected.as_deref()),
+        &rules,
+        &knowledge,
+        on_progress,
+    )
 }
 
 /// 对给定的工具集合执行一次同步（**不含 SSOT 读取，不做路径推断**）。
@@ -1433,138 +1329,135 @@ mod tests {
     }
 
     // ------------------------------------------------------------------------
-    // 探针检测（增补任务）——真实 Adapter + 临时目录
+    // 工具扫描与接入（TASK-21）——纯只读探测 + 纯函数过滤，全部走临时目录
     //
-    // ⚠️ Codex 的**自动取证**不在这里测：那会真的启动 `codex debug` 子进程，
-    // 慢且依赖本机环境。它的读取语义由 TASK-18 的 Spike 实证 + TASK-15 的
-    // 端到端走查覆盖；这里只测写入 / 移除 / 判定分支。
+    // ⚠️ save_enabled_tools_and_sync 的「写状态 + 真同步」组合不进单测：
+    // 它会写**真实**状态文件（本机有真实用户数据）。生产胶水层的接线由
+    // ipc_contract.rs 锁定，同步编排本身由 run_for_tools 的既有测试覆盖。
     // ------------------------------------------------------------------------
 
-    /// 用注入临时目录的真实 Adapter 拼一份工具清单。
-    fn probe_tools_with_base(dir: &Path) -> Vec<ToolDescriptor> {
-        vec![
-            ToolDescriptor {
-                tool_id: "claude_code",
-                display_name: "Claude Code",
-                push_path: PathBuf::from("/nowhere"),
-                adapter: Box::new(ClaudeCodeAdapter::with_base_dir(dir)),
-            },
-            ToolDescriptor {
-                tool_id: "antigravity",
-                display_name: "Antigravity IDE",
-                push_path: PathBuf::from("/nowhere"),
-                adapter: Box::new(AntigravityAdapter::with_base_dir(dir)),
-            },
-            ToolDescriptor {
-                tool_id: "codex",
-                display_name: "Codex",
-                push_path: PathBuf::from("/nowhere"),
-                adapter: Box::new(CodexAdapter::with_base_dir(dir)),
-            },
-        ]
-    }
-
-    /// 探针必须真的落到 `<skills>/crossbrain-probe/SKILL.md`，且标记同时
-    /// 出现在文件正文与 frontmatter 的 description 里（后者才是模型可见的）。
+    /// 扫描必须只读：发现的目录照实报告，没发现的保持「未安装」，
+    /// 且**不得在 home 里创建任何东西**。
     #[test]
-    fn probe_writes_skill_and_reports_manual_for_injectable_tools() {
-        for tool_id in ["claude_code", "antigravity"] {
-            let tmp = TempKnowledgeDir::new();
-            let tools = probe_tools_with_base(&tmp.0);
-
-            let result = run_tool_probe_for(&tools, tool_id);
-            assert_eq!(result.status, ProbeStatus::NeedsManual, "工具：{tool_id}");
-            assert!(result.token.starts_with("cb-probe-"), "标记形态：{}", result.token);
-            assert!(
-                result.message.contains(&result.token) && result.message.contains("移除探针"),
-                "人工指引必须带标记与清理入口：{}",
-                result.message
-            );
-
-            let skill = tmp
-                .0
-                .join("skills")
-                .join(PROBE_SLUG)
-                .join("SKILL.md");
-            let text = fs::read_to_string(&skill)
-                .unwrap_or_else(|e| panic!("{tool_id} 探针未落盘：{e}"));
-            assert!(text.contains(&result.token), "正文缺标记：{text}");
-            assert!(
-                text.contains(&format!("description: 连通性探针 {}", result.token)),
-                "frontmatter 的 description 必须含标记（模型可见的是它）：{text}"
-            );
-
-            // 移除幂等：第一次删掉，第二次「无需清理」
-            let removed = remove_tool_probe_for(&tools, tool_id).unwrap();
-            assert!(removed.contains("已移除"), "实际：{removed}");
-            assert!(!skill.exists(), "移除后探针目录不应残留");
-            let again = remove_tool_probe_for(&tools, tool_id).unwrap();
-            assert!(again.contains("无需清理"), "实际：{again}");
-        }
-    }
-
-    /// 探针移除只删 `crossbrain-probe` 自己——同目录下的真实技能必须原样保留。
-    #[test]
-    fn probe_removal_spares_real_skills() {
+    fn scan_detects_installed_tools_and_is_read_only() {
         let tmp = TempKnowledgeDir::new();
-        let skills = tmp.0.join("skills");
-        fs::create_dir_all(skills.join("crossbrain-vue3-abc123")).unwrap();
-        fs::write(
-            skills.join("crossbrain-vue3-abc123").join("SKILL.md"),
-            "# 真实技能",
-        )
-        .unwrap();
-        fs::create_dir_all(skills.join(PROBE_SLUG)).unwrap();
+        fs::create_dir_all(tmp.0.join(".claude")).unwrap();
+        fs::create_dir_all(tmp.0.join(".cursor")).unwrap();
 
-        let tools = probe_tools_with_base(&tmp.0);
-        remove_tool_probe_for(&tools, "antigravity").unwrap();
+        // None = 用户从未做过选择 → 已适配的三个按「默认接入」显示为已选
+        //（与真实同步行为一致——没选过就是三个全跑）
+        let result = scan_installed_tools_in(&tmp.0, None);
 
+        let by_id = |id: &str| {
+            result
+                .iter()
+                .find(|t| t.tool_id == id)
+                .unwrap_or_else(|| panic!("扫描结果缺 {id}"))
+        };
+
+        // 目录清单顺序：已适配三件套在最前
+        assert_eq!(result[0].tool_id, "claude_code");
+        assert_eq!(result[1].tool_id, "antigravity");
+        assert_eq!(result[2].tool_id, "codex");
+
+        let claude = by_id("claude_code");
+        assert!(claude.installed && claude.adapted && claude.selected);
+        // antigravity 没建目录：未安装但仍是默认已选（选择与安装是两回事）
+        let antigravity = by_id("antigravity");
+        assert!(!antigravity.installed && antigravity.selected);
+
+        let cursor = by_id("cursor");
+        assert!(cursor.installed && !cursor.adapted && !cursor.selected);
+        assert!(cursor.push_path.starts_with("~/"), "落点展示：{}", cursor.push_path);
+
+        assert!(!by_id("qoder").installed);
+
+        // 纯只读：扫描后 home 里不得多出任何目录
+        assert!(!tmp.0.join(".zcode").exists());
+        assert!(!tmp.0.join(".qoder").exists());
+        assert!(!tmp.0.join(".codebuddy").exists());
+    }
+
+    /// 用户显式保存过的清单（含未适配工具的意愿）必须原样反映到扫描结果。
+    #[test]
+    fn scan_honors_explicit_selection_including_unadapted_desire() {
+        let tmp = TempKnowledgeDir::new();
+        let sel = vec!["codex".to_string(), "cursor".to_string()];
+
+        let result = scan_installed_tools_in(&tmp.0, Some(&sel));
+        let by_id = |id: &str| {
+            result
+                .iter()
+                .find(|t| t.tool_id == id)
+                .unwrap_or_else(|| panic!("扫描结果缺 {id}"))
+        };
+
+        assert!(!by_id("claude_code").selected, "未勾选的不得显示已选");
+        assert!(by_id("codex").selected);
         assert!(
-            skills.join("crossbrain-vue3-abc123").join("SKILL.md").exists(),
-            "探针移除不得波及真实技能"
+            by_id("cursor").selected && !by_id("cursor").adapted,
+            "未适配工具的意愿也按用户选择展示，但 adapted 必须为 false"
         );
     }
 
-    /// 未知工具与未安装工具都必须给出**用户可读**的失败结论，
-    /// 且不落任何文件。
+    /// 规范化：未知 id 拒绝、重复去重、保持用户勾选顺序。
     #[test]
-    fn probe_fails_cleanly_for_unknown_or_missing_tools() {
-        let tmp = TempKnowledgeDir::new();
-        let tools = probe_tools_with_base(&tmp.0);
+    fn normalize_selection_rejects_unknown_dedups_and_keeps_order() {
+        let ids = vec![
+            "codex".to_string(),
+            "cursor".to_string(),
+            "codex".to_string(),
+        ];
+        let out = normalize_selection(&ids).unwrap();
+        assert_eq!(out, vec!["codex".to_string(), "cursor".to_string()]);
 
-        let unknown = run_tool_probe_for(&tools, "nope");
-        assert_eq!(unknown.status, ProbeStatus::Failed);
-        assert_eq!(unknown.message, "未知工具");
-
-        // base_dir 指向不存在的子路径 → detect=false
-        let missing = TempKnowledgeDir::new();
-        let absent_tools = vec![ToolDescriptor {
-            tool_id: "claude_code",
-            display_name: "Claude Code",
-            push_path: PathBuf::from("/nowhere"),
-            adapter: Box::new(ClaudeCodeAdapter::with_base_dir(missing.0.join("absent"))),
-        }];
-        let result = run_tool_probe_for(&absent_tools, "claude_code");
-        assert_eq!(result.status, ProbeStatus::Failed);
-        assert!(
-            result.message.contains("未检测到此工具"),
-            "实际文案：{}",
-            result.message
-        );
-        assert!(!missing.0.join("absent").exists(), "失败路径不得创建目录");
+        let bad = vec!["not_a_tool".to_string()];
+        let err = normalize_selection(&bad).unwrap_err();
+        assert!(err.contains("not_a_tool"), "报错要指出是哪个 id：{err}");
     }
 
-    /// 移除命令对「工具未安装」也要幂等成功（探针清理不该依赖安装状态）。
+    /// 同步范围过滤：None 全保留；清单只留匹配的已适配工具；
+    /// 未适配 id（意愿记录）绝不能凭空造出 Adapter。
     #[test]
-    fn probe_removal_works_even_when_tool_missing() {
+    fn filter_tools_follows_selection_and_drops_unadapted_ids() {
         let tmp = TempKnowledgeDir::new();
-        let tools = vec![ToolDescriptor {
-            tool_id: "codex",
-            display_name: "Codex",
-            push_path: PathBuf::from("/nowhere"),
-            adapter: Box::new(CodexAdapter::with_base_dir(tmp.0.join("absent"))),
-        }];
-        let removed = remove_tool_probe_for(&tools, "codex").unwrap();
-        assert!(removed.contains("无需清理"), "实际：{removed}");
+        // ToolDescriptor 不可 Clone（Adapter 是 Box<dyn Adapter>），
+        // 每个场景重新构造一份
+        let make_all = || {
+            let desc = |tool_id: &'static str, adapter: Box<dyn Adapter>| ToolDescriptor {
+                tool_id,
+                display_name: "任意",
+                push_path: PathBuf::from("/nowhere"),
+                adapter,
+            };
+            vec![
+                desc(
+                    "claude_code",
+                    Box::new(ClaudeCodeAdapter::with_base_dir(&tmp.0)),
+                ),
+                desc(
+                    "antigravity",
+                    Box::new(AntigravityAdapter::with_base_dir(&tmp.0)),
+                ),
+                desc("codex", Box::new(CodexAdapter::with_base_dir(&tmp.0))),
+            ]
+        };
+
+        assert_eq!(
+            filter_tools_with(make_all(), None).len(),
+            3,
+            "未做过选择 = 全保留"
+        );
+
+        let sel = vec!["codex".to_string()];
+        let filtered = filter_tools_with(make_all(), Some(&sel));
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].tool_id, "codex");
+
+        let unadapted = vec!["cursor".to_string()];
+        assert!(
+            filter_tools_with(make_all(), Some(&unadapted)).is_empty(),
+            "未适配 id 不得匹配出任何 Adapter"
+        );
     }
 }

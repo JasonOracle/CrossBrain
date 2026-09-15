@@ -59,6 +59,17 @@ pub struct AppState {
     /// 用持久化标记而不是每次弹：告知一次即可，反复打断是另一种不尊重。
     #[serde(default)]
     pub link_notice_shown: bool,
+
+    /// 用户在「工具接入」扫描弹窗里勾选保存的工具 id 清单（TASK-21）。
+    ///
+    /// `None` = 用户**从未用过扫描**（老用户 / 新安装）——此时按默认行为：
+    /// 三个已适配工具全部参与同步。这个语义让旧状态文件无需迁移。
+    ///
+    /// `Some(list)` = 用户明确做过选择。清单里**允许出现尚未适配的工具 id**
+    /// （如 `cursor`）：那是用户的接入意愿，先记下来作为后续适配的依据；
+    /// 参与同步的只有 `list` 与已适配工具的交集（见 `sync.rs` 的过滤逻辑）。
+    #[serde(default)]
+    pub selected_tools: Option<Vec<String>>,
 }
 
 impl Default for AppState {
@@ -68,6 +79,7 @@ impl Default for AppState {
             last_sync_at: None,
             last_sync_ok: false,
             link_notice_shown: false,
+            selected_tools: None,
         }
     }
 }
@@ -109,6 +121,16 @@ pub fn mark_synced(at: impl Into<String>, ok: bool) -> Result<(), String> {
 pub fn mark_link_notice_shown() -> Result<(), String> {
     let mut state = load();
     state.link_notice_shown = true;
+    save(&state)
+}
+
+/// 记录用户在「工具接入」弹窗里勾选保存的工具清单（TASK-21）。
+///
+/// 允许包含尚未适配的工具 id（那是**意愿记录**，不同步）；
+/// 去重与合法性校验由调用方（`sync.rs`）负责，这里只做持久化。
+pub fn mark_selected_tools(ids: Vec<String>) -> Result<(), String> {
+    let mut state = load();
+    state.selected_tools = Some(ids);
     save(&state)
 }
 
@@ -231,6 +253,7 @@ mod tests {
             last_sync_at: Some("2026-09-14 22:30".to_string()),
             last_sync_ok: true,
             link_notice_shown: false,
+            selected_tools: Some(vec!["claude_code".to_string(), "codex".to_string()]),
         };
 
         save_to(&dir.file(), &state).unwrap();
@@ -252,6 +275,30 @@ mod tests {
             "缺失的 link_notice_shown 应取默认值 false —— \
              否则老状态文件会让新用户永远看不到断链说明"
         );
+        assert!(
+            state.selected_tools.is_none(),
+            "缺失的 selected_tools 应取默认值 None —— \
+             老用户没做过扫描，必须继续按「三个工具全启用」走，不能被当成「一个都没选」"
+        );
+    }
+
+    /// TASK-21：selected_tools 必须跨读写保持——
+    /// 保存后重启应用，用户勾选的工具清单还在，同步范围才稳定。
+    #[test]
+    fn selected_tools_roundtrips() {
+        let dir = TempDir::new("selected-tools");
+        let path = dir.file();
+
+        let ids = vec![
+            "codex".to_string(),
+            "cursor".to_string(), // 未适配工具：意愿记录，允许保存
+        ];
+        let mut state = load_from(&path);
+        state.selected_tools = Some(ids.clone());
+        save_to(&path, &state).unwrap();
+
+        let reloaded = load_from(&path);
+        assert_eq!(reloaded.selected_tools, Some(ids));
     }
 
     /// 断链说明的标记必须能跨读写保持：否则每次同步都会再弹一次。

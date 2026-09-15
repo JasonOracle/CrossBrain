@@ -197,31 +197,40 @@ pub async fn uninstall_crossbrain() -> Result<Vec<sync::UninstallOutcome>, Strin
 }
 
 // ============================================================================
-// 探针检测（增补任务：验证工具真的读到了 CrossBrain 的内容）
+// 工具扫描与接入（TASK-21）
 // ============================================================================
 
-/// 对一个工具执行探针检测：写入临时探针技能，能自动取证的直接给结论。
+/// 扫描本机已安装的编程工具（「工具接入」弹窗展示）。
 ///
-/// Codex 侧会真实启动它的调试命令（最长约 30 秒），因此与 [`run_sync`]
-/// 同理必须 `async` + `spawn_blocking`，不能占住主线程。
+/// **纯只读**：只按已知特征路径探测安装痕迹，不写任何文件。
+/// 文件 IO 挪到阻塞线程池，与 [`run_sync`] 同理，不占主线程。
 #[tauri::command]
-pub async fn run_tool_probe(tool_id: String) -> sync::ProbeOutcome {
-    let joined = tauri::async_runtime::spawn_blocking(move || sync::run_tool_probe(&tool_id))
+pub async fn scan_installed_tools() -> Vec<sync::ScannedTool> {
+    tauri::async_runtime::spawn_blocking(sync::scan_installed_tools)
         .await
-        .unwrap_or_else(|_| sync::ProbeOutcome {
-            tool_id: String::new(),
-            display_name: String::new(),
-            status: sync::ProbeStatus::Failed,
-            token: String::new(),
-            message: "检测过程意外中断，请重试。".to_string(),
-        });
-    joined
+        .unwrap_or_default()
 }
 
-/// 移除一个工具的探针（幂等：本来没有就说明无需清理）。
+/// 保存用户勾选的工具清单，并**立即按新范围执行一次完整同步**。
+///
+/// 「保存即同步」已在弹窗里向用户预告（含「会写入规则与技能、自动备份」），
+/// 这里不再二次确认——但同步结果要照常记入状态栏（[`state::mark_synced`]）。
+/// 进度事件与 [`run_sync`] 共用同一通道，前端弹窗里可以实时显示。
 #[tauri::command]
-pub fn remove_tool_probe(tool_id: String) -> Result<String, String> {
-    sync::remove_tool_probe(&tool_id)
+pub async fn save_enabled_tools(app: AppHandle, tool_ids: Vec<String>) -> Result<SyncReport, String> {
+    let emitter = app.clone();
+
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        sync::save_enabled_tools_and_sync(&tool_ids, &mut |progress| {
+            let _ = emitter.emit(sync::SYNC_PROGRESS_EVENT, &progress);
+        })
+    })
+    .await
+    .map_err(|_| "保存过程意外中断，请重试。".to_string())?;
+
+    let report = joined?;
+    let _ = state::mark_synced(sync::now_display(), report.ok);
+    Ok(report)
 }
 
 // ============================================================================
