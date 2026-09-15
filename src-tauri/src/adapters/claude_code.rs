@@ -49,7 +49,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::{
-    cleanup_crossbrain_orphans, ensure_crossbrain_slug, inject_marker_block, Adapter, AdapterError,
+    cleanup_crossbrain_orphans, delete_backup_files, ensure_crossbrain_slug, inject_marker_block,
+    pre_restore_path, remove_marker_block_from_file, skill_cleanup_actions, Adapter, AdapterError,
     CleanupReport, L0Backup,
 };
 use crate::paths;
@@ -237,6 +238,27 @@ impl Adapter for ClaudeCodeAdapter {
             target_file: self.claude_md_file(),
             backup_file: self.backup_file(),
         })
+    }
+
+    fn uninstall(&self) -> Result<Vec<String>, AdapterError> {
+        let mut actions = Vec::new();
+
+        // ① 移除标记块（标记块外内容原样保留）。必须在删备份**之前**：
+        //    备份是用户唯一的「回到最初」手段，移除成功后它才变成冗余。
+        if let Some(desc) = remove_marker_block_from_file(&self.claude_md_file(), &self.backup_file())? {
+            actions.push(desc);
+        }
+
+        // ② 删除备份文件（去痕）
+        actions.extend(delete_backup_files(
+            &self.backup_file(),
+            &pre_restore_path(&self.claude_md_file()),
+        ));
+
+        // ③ 清空本工具 skills 目录下的全部 crossbrain-* 目录
+        actions.extend(skill_cleanup_actions(self.cleanup_orphans(&[])?));
+
+        Ok(actions)
     }
 }
 
@@ -752,4 +774,37 @@ mod tests {
 
     // 标记块协议本身的测试（判定与替换的一致性等）已随实现迁至共享层
     // `adapters/mod.rs` 的测试模块——协议在哪里，验证就在哪里。
+
+    /// 卸载全周期：同步注入 → 卸载 → 用户内容原样回来、备份与技能目录清空（TASK-14）。
+    #[test]
+    fn uninstall_restores_user_content_and_removes_traces() {
+        let env = TempEnv::new("uninstall");
+        let adapter = env.adapter();
+
+        // 用户原有内容 + 一个自建技能目录（绝不能被误删）
+        fs::write(env.claude_md(), USER_ORIGINAL).unwrap();
+        let skill = env.path("skills").join("crossbrain-demo-abc123");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "---\nname: demo\n---\n").unwrap();
+        let user_skill = env.path("skills").join("my-own-skill");
+        fs::create_dir_all(&user_skill).unwrap();
+
+        adapter.sync_l0("规则正文").unwrap();
+        assert!(env.backup().is_file());
+
+        let actions = adapter.uninstall().unwrap();
+        assert!(
+            actions.iter().any(|a| a.contains("原样保留")),
+            "动作描述要向用户说明内容未丢：{actions:?}"
+        );
+
+        let restored = fs::read_to_string(env.claude_md()).unwrap();
+        assert_eq!(
+            restored, USER_ORIGINAL,
+            "标记块移除后必须回到用户原文（尾部空白归整为单个换行）"
+        );
+        assert!(!env.backup().exists(), "备份必须被删除（去痕）");
+        assert!(!skill.exists(), "crossbrain-* 技能目录必须被删除");
+        assert!(user_skill.exists(), "用户自建技能绝不能被误删");
+    }
 }

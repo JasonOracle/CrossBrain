@@ -48,6 +48,24 @@ function onWizardDone() {
   firstRun.value = false;
 }
 
+/**
+ * 主工作台里完成「一键卸载」→ 回到向导（TASK-14）。
+ *
+ * 卸载删除了状态文件，本机已回到「未初始化」；但内存里的 `startup`
+ * 还是旧值，不重新读就会停留在已卸载的主界面。这里重读一次本机状态
+ * （此时 `firstRun` 必为 true），让界面自然切回向导。
+ */
+async function onUninstalled() {
+  try {
+    const state = await getStartupState();
+    startup.value = state;
+    firstRun.value = state.firstRun;
+  } catch {
+    // 卸载已完成，状态读取失败只影响回向导这一步——整窗重载兜底
+    window.location.reload();
+  }
+}
+
 /** 重新加载整个窗口（读不到本机状态时的重试入口） */
 function reloadApp() {
   window.location.reload();
@@ -83,7 +101,7 @@ function reloadApp() {
       </div>
 
       <WizardView v-else-if="firstRun" :startup="startup" @done="onWizardDone" />
-      <MainView v-else :startup="startup" />
+      <MainView v-else :startup="startup" @uninstalled="onUninstalled" />
     </n-message-provider>
   </n-config-provider>
 </template>

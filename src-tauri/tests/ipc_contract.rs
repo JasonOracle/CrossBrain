@@ -160,6 +160,10 @@ fn dto_fields_are_mirrored_on_both_sides() {
         ("dirName", "dir_name"),
         ("skillName", "skill_name"),
         ("charCount", "char_count"),
+        // TASK-14 新增：一键卸载的单工具结果
+        ("toolId", "tool_id"),
+        ("displayName", "display_name"),
+        ("actions", "actions"),
     ];
 
     for (ts_name, rust_name) in pairs {
@@ -444,5 +448,47 @@ fn status_bar_matches_prd_contract() {
     assert!(
         code.contains("report?.ok") || code.contains("report.ok"),
         "同步成功与否没有采用报告的权威字段 report.ok——前端自行判定会与后端真相分叉"
+    );
+}
+
+// ============================================================================
+// TASK-14：一键卸载 / 去痕
+// ============================================================================
+
+/// 卸载是**删除性**操作，前端必须二次确认；确认前不得调用后端命令。
+///
+/// 同时锁住三件事：
+/// - 确认弹窗真实存在（`pendingUninstall` 状态 + `askUninstall`/`confirmUninstall`
+///   两段式——一点就执行 = 没有确认）
+/// - 前后端命令名与类型名对齐（`uninstall_crossbrain` / `UninstallOutcome`）
+/// - 状态文件的删除发生在命令层（卸载成功才删，下次启动回向导）
+#[test]
+fn uninstall_requires_confirmation_and_wiring_matches() {
+    let main_view = strip_line_comments(&repo_file("src/views/MainView.vue"));
+    assert!(
+        main_view.contains("askUninstall") && main_view.contains("confirmUninstall"),
+        "卸载缺少两段式入口——点按钮直接执行等于没有二次确认"
+    );
+    assert!(
+        main_view.contains("pendingUninstall"),
+        "卸载确认弹窗的状态缺失"
+    );
+
+    let api = strip_line_comments(&repo_file("src/api.ts"));
+    // ⚠️ 必须断言**完整调用形态**（含收尾的 `")`）：只查子串的话，
+    // 命令名被改成 uninstall_crossbrain_x 之类的变体也照样通过（实测踩过）。
+    assert!(
+        api.contains("invoke<UninstallOutcome[]>(\"uninstall_crossbrain\")"),
+        "api.ts 的卸载命令名或结果类型与后端对不上"
+    );
+
+    let commands = strip_line_comments(&repo_file("src-tauri/src/commands.rs"));
+    assert!(
+        commands.contains("pub async fn uninstall_crossbrain()"),
+        "后端卸载命令名已改动，前端调用会对不上"
+    );
+    assert!(
+        commands.contains("state::remove_state_file()"),
+        "卸载后必须删除运行状态文件——否则下次启动不会重新走向导"
     );
 }

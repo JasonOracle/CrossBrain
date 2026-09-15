@@ -112,6 +112,27 @@ pub fn mark_link_notice_shown() -> Result<(), String> {
     save(&state)
 }
 
+/// 删除状态文件（TASK-14「一键卸载 / 去痕」）。
+///
+/// 卸载成功后由命令层调用：状态是**本机运行痕迹**，去痕要求它一并消失；
+/// 删掉后下次启动 `load()` 回退默认值，应用会重新走向导——这正是
+/// 「已卸载、重新配置」的正确行为。文件不存在视为已删除。
+///
+/// ⚠️ 只删状态文件本身。`~/.ai-profile/` 下的 `global/rules.md` 与
+/// `knowledge/` 是**用户自己的数据**，卸载不碰它们。
+pub fn remove_state_file() -> Result<(), String> {
+    remove_state_file_at(&state_file())
+}
+
+/// [`remove_state_file`] 的可注入变体（测试用临时路径，与 [`load_from`] / [`save_to`] 同理）。
+pub fn remove_state_file_at(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("无法删除运行状态文件，请检查文件夹访问权限".to_string()),
+    }
+}
+
 // ============================================================================
 // 可注入路径的实现（测试专用入口，生产代码走上面的无参封装）
 // ============================================================================
@@ -259,5 +280,23 @@ mod tests {
 
         save_to(&nested, &AppState::default()).unwrap();
         assert!(nested.is_file(), "父目录未被自动创建");
+    }
+
+    /// 卸载去痕：状态文件删除后读取必须回退默认值（下次启动重新走向导），
+    /// 且删除不存在的文件按成功处理（幂等，TASK-14）。
+    #[test]
+    fn remove_state_file_is_idempotent_and_resets_to_default() {
+        let dir = TempDir::new("remove-state");
+        let path = dir.path.join(paths::STATE_FILE_NAME);
+
+        save_to(&path, &AppState::default()).unwrap();
+        remove_state_file_at(&path).unwrap();
+        assert!(!path.exists(), "状态文件应被删除");
+
+        let fresh = load_from(&path);
+        assert!(!fresh.wizard_completed, "删除后必须回到「未初始化」默认值");
+
+        // 再删一次：NotFound 按成功处理
+        remove_state_file_at(&path).unwrap();
     }
 }

@@ -86,9 +86,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::{
-    cleanup_crossbrain_orphans, ensure_crossbrain_slug, ensure_no_marker_in_content,
-    inject_marker_block, Adapter, AdapterError, CleanupReport, L0Backup, MARKER_END, MARKER_NOTE,
-    MARKER_START,
+    cleanup_crossbrain_orphans, delete_backup_files, ensure_crossbrain_slug,
+    ensure_no_marker_in_content, inject_marker_block, pre_restore_path,
+    remove_marker_block_from_file, skill_cleanup_actions, Adapter, AdapterError, CleanupReport,
+    L0Backup, MARKER_END, MARKER_NOTE, MARKER_START,
 };
 use crate::paths;
 
@@ -312,6 +313,30 @@ impl Adapter for CodexAdapter {
             target_file: self.agents_md_file(),
             backup_file: self.backup_file(),
         })
+    }
+
+    fn uninstall(&self) -> Result<Vec<String>, AdapterError> {
+        let mut actions = Vec::new();
+
+        // ① 移除标记块（内联的规则全文随之消失，用户自己的指令原样保留）。
+        //    顺序与 Claude Code 相同：先移块、后删备份。
+        if let Some(desc) =
+            remove_marker_block_from_file(&self.agents_md_file(), &self.backup_file())?
+        {
+            actions.push(desc);
+        }
+
+        // ② 删除备份文件（去痕）
+        actions.extend(delete_backup_files(
+            &self.backup_file(),
+            &pre_restore_path(&self.agents_md_file()),
+        ));
+
+        // ③ 清空 skills 目录下的 crossbrain-* 目录（`skills/.system/` 不带前缀，
+        //    由共享清理函数的结构性安全自动跳过）
+        actions.extend(skill_cleanup_actions(self.cleanup_orphans(&[])?));
+
+        Ok(actions)
     }
 }
 
@@ -806,5 +831,33 @@ mod tests {
             fs::read_to_string(b.agents_md()).unwrap(),
             "两条入口产出的文件内容必须一致"
         );
+    }
+
+    /// 卸载全周期：内联注入 → 卸载 → 用户指令原样回来、备份与技能目录清空（TASK-14）。
+    #[test]
+    fn uninstall_restores_user_content_and_removes_traces() {
+        let env = TempEnv::new("uninstall");
+        let adapter = env.adapter();
+
+        fs::write(env.agents_md(), USER_ORIGINAL).unwrap();
+        let skill = env.root.join("skills").join("crossbrain-demo-abc123");
+        fs::create_dir_all(&skill).unwrap();
+        let system = env.root.join("skills").join(".system");
+        fs::create_dir_all(&system).unwrap();
+
+        adapter.sync_l0("规则正文").unwrap();
+        assert!(env.backup().is_file());
+
+        let actions = adapter.uninstall().unwrap();
+        assert!(
+            actions.iter().any(|a| a.contains("原样保留")),
+            "动作描述要向用户说明内容未丢：{actions:?}"
+        );
+
+        let restored = fs::read_to_string(env.agents_md()).unwrap();
+        assert_eq!(restored, USER_ORIGINAL, "移除后必须回到用户原文");
+        assert!(!env.backup().exists(), "备份必须被删除");
+        assert!(!skill.exists(), "crossbrain-* 技能目录必须被删除");
+        assert!(system.exists(), "skills/.system/（Codex 内置）绝不能被删");
     }
 }

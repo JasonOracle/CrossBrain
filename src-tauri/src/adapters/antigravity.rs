@@ -33,7 +33,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::{
-    cleanup_crossbrain_orphans, ensure_crossbrain_slug, Adapter, AdapterError, CleanupReport,
+    cleanup_crossbrain_orphans, ensure_crossbrain_slug, skill_cleanup_actions, Adapter,
+    AdapterError, CleanupReport,
 };
 use crate::paths;
 
@@ -141,6 +142,30 @@ impl Adapter for AntigravityAdapter {
         // 清理规则与 Claude Code Adapter 完全一致（TASK-08 要求两者行为一致），
         // 故共用 `super::cleanup_crossbrain_orphans`；两边的差异只在 skills_dir 的取值。
         cleanup_crossbrain_orphans(&self.skills_dir(), active_slugs)
+    }
+
+    fn uninstall(&self) -> Result<Vec<String>, AdapterError> {
+        let mut actions = Vec::new();
+
+        // ① 删除独立规则文件。本 Adapter 写的是**自己的文件**（不注入用户文件），
+        //    所以没有标记块与备份的概念——直接删文件即可完整去痕。
+        let l0 = self.l0_file();
+        match fs::remove_file(&l0) {
+            Ok(()) => actions.push(format!("已删除规则文件 {}", l0.display())),
+            // 文件不存在 = 从未同步过，静默跳过（与同步侧语义一致）
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(AdapterError::Other(format!(
+                    "删除 {} 失败：{e}",
+                    l0.display()
+                )))
+            }
+        }
+
+        // ② 清空 skills 目录下的全部 crossbrain-* 目录
+        actions.extend(skill_cleanup_actions(self.cleanup_orphans(&[])?));
+
+        Ok(actions)
     }
 }
 
@@ -407,5 +432,33 @@ mod tests {
             "没有孤儿时不应删除任何东西"
         );
         assert_eq!(report.kept_dirs.len(), 2);
+    }
+
+    /// 卸载：独立规则文件与 crossbrain-* 技能目录全部删除（TASK-14）。
+    /// 本 Adapter 不注入用户文件，所以没有标记块/备份概念——删自己的文件即完整去痕。
+    #[test]
+    fn uninstall_removes_l0_file_and_skill_dirs() {
+        let env = TempEnv::new("uninstall");
+        let adapter = env.adapter();
+
+        adapter.sync_l0("规则正文").unwrap();
+        let skill = env.path("skills").join("crossbrain-demo-abc123");
+        fs::create_dir_all(&skill).unwrap();
+        assert!(env.path("rules").join("crossbrain-L0.md").is_file());
+
+        let actions = adapter.uninstall().unwrap();
+        assert!(
+            actions.iter().any(|a| a.contains("已删除规则文件")),
+            "动作描述要列出删掉的规则文件：{actions:?}"
+        );
+        assert!(
+            !env.path("rules").join("crossbrain-L0.md").exists(),
+            "独立规则文件必须被删除"
+        );
+        assert!(!skill.exists(), "技能目录必须被删除");
+
+        // 幂等：没有痕迹时再卸载一次，返回空动作且不报错
+        let again = adapter.uninstall().unwrap();
+        assert!(again.is_empty(), "第二次卸载应无事可做：{again:?}");
     }
 }

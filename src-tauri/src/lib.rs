@@ -32,6 +32,7 @@ pub fn run() {
             commands::create_knowledge,
             commands::save_knowledge,
             commands::delete_knowledge,
+            commands::uninstall_crossbrain,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

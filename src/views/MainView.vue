@@ -22,6 +22,7 @@ import IconCheck from "~icons/lucide/check";
 import IconMinus from "~icons/lucide/minus";
 import IconRefresh from "~icons/lucide/refresh-cw";
 import IconRotateCcw from "~icons/lucide/rotate-ccw";
+import IconTrash from "~icons/lucide/trash";
 import IconWifiOff from "~icons/lucide/wifi-off";
 
 import {
@@ -30,6 +31,7 @@ import {
   restoreBackup,
   runSync,
   toUserMessage,
+  uninstallCrossbrain,
   type BackupInfo,
   type StartupState,
   type SyncReport,
@@ -42,6 +44,9 @@ import { useLinkNotice } from "../composables/useLinkNotice";
 import { useRuleEditor } from "../composables/useRuleEditor";
 
 const props = defineProps<{ startup: StartupState | null }>();
+
+/** 卸载完成 → 通知 App 重读本机状态、切回向导（TASK-14） */
+const emit = defineEmits<{ uninstalled: [] }>();
 
 const activeTab = ref("rules");
 
@@ -75,6 +80,44 @@ function onRulesSaved() {
 
 function onRulesSaveFailed(reason: string) {
   message.error(reason);
+}
+
+/** ── 「设置 → 卸载」区（TASK-14）── */
+/** 二次确认弹窗开关 */
+const pendingUninstall = ref(false);
+/** 防重复点击 */
+const uninstalling = ref(false);
+/** 卸载失败的提示（成功会直接切回向导，无需在此展示结果） */
+const uninstallError = ref("");
+
+/** 点「卸载」——先弹确认，不直接动手 */
+function askUninstall() {
+  uninstallError.value = "";
+  pendingUninstall.value = true;
+}
+
+function cancelUninstall() {
+  if (uninstalling.value) return;
+  pendingUninstall.value = false;
+}
+
+/** 用户确认后才真正执行卸载 */
+async function confirmUninstall() {
+  if (uninstalling.value) return;
+  pendingUninstall.value = false;
+  uninstalling.value = true;
+  uninstallError.value = "";
+
+  try {
+    await uninstallCrossbrain();
+    // 成功提示挂在 provider 层，切回向导后依然可见
+    message.success("已完成卸载。你的全局规则与技能知识保留在本机，随时可以重新开始。");
+    emit("uninstalled");
+  } catch (e) {
+    uninstallError.value = toUserMessage(e);
+  } finally {
+    uninstalling.value = false;
+  }
 }
 
 /** ── 「设置 → 备份与还原」区（TASK-19） ── */
@@ -435,6 +478,30 @@ function currentLocalTime(): string {
               {{ restoreError }}
             </n-alert>
           </section>
+
+          <!-- ── 卸载 / 去痕（TASK-14）：删除性操作，必须二次确认 ── -->
+          <section class="mt-8 flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4">
+            <div>
+              <h2 class="text-base font-medium text-error-500">卸载 CrossBrain</h2>
+              <p class="mt-1 text-sm leading-6 text-neutral-500">
+                从所有支持的编程工具中移除 CrossBrain 写入的内容，并清空它的技能目录与备份。
+                你自己的全局规则和技能知识会保留在本机，不会被删除。
+              </p>
+            </div>
+
+            <n-alert v-if="uninstallError" type="error" :bordered="false">
+              {{ uninstallError }}
+            </n-alert>
+
+            <div>
+              <n-button type="error" secondary :loading="uninstalling" @click="askUninstall">
+                <template #icon>
+                  <IconTrash class="h-4 w-4" aria-hidden="true" />
+                </template>
+                卸载 CrossBrain
+              </n-button>
+            </div>
+          </section>
         </n-tab-pane>
       </n-tabs>
     </main>
@@ -471,6 +538,41 @@ function currentLocalTime(): string {
         <div class="flex justify-end gap-2">
           <n-button @click="cancelRestore">取消</n-button>
           <n-button type="primary" @click="confirmRestore">确认还原</n-button>
+        </div>
+      </template>
+    </n-modal>
+
+    <!-- 卸载的二次确认（TASK-14）：删除性操作，范围必须写清楚 -->
+    <n-modal
+      :show="pendingUninstall"
+      preset="card"
+      style="width: 560px"
+      title="确认卸载 CrossBrain？"
+      :mask-closable="false"
+      @update:show="(v: boolean) => !v && cancelUninstall()"
+    >
+      <div class="flex flex-col gap-2 text-sm leading-6 text-neutral-700">
+        <p>确认后将执行：</p>
+        <ul class="flex flex-col gap-1 pl-5">
+          <li class="list-disc">
+            从 Claude Code、Antigravity IDE、Codex 的配置文件中移除 CrossBrain
+            写入的内容——<span class="text-neutral-900">你自己的配置原样保留</span>
+          </li>
+          <li class="list-disc">删除 CrossBrain 放进各工具的技能目录</li>
+          <li class="list-disc">删除 CrossBrain 的备份文件与运行记录</li>
+        </ul>
+        <p class="text-xs text-neutral-500">
+          不会删除：保存在本机的全局规则与技能知识（它们是你的数据）。
+          卸载后再次打开 CrossBrain，会像第一次使用一样进入引导。
+        </p>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <n-button :disabled="uninstalling" @click="cancelUninstall">取消</n-button>
+          <n-button type="error" :loading="uninstalling" @click="confirmUninstall">
+            确认卸载
+          </n-button>
         </div>
       </template>
     </n-modal>

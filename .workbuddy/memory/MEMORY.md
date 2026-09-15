@@ -25,7 +25,7 @@
 
 - **两条致命照搬**：给单文件型工具写独立文件→永不被读；给非 Claude 工具用 `@` 引用（`@` 是 Claude 专有）。先判目录型/单文件型。
 - **遮蔽文件**：Codex `AGENTS.override.md` 优先且同级只取第一个非空 → `reject_if_override_present()` 硬拦截。每接新工具反问：有没有优先级更高的文件遮蔽落点？
-- 共享层在 `adapters/mod.rs`（`inject_marker_block` 四情况协议 / `write_breaking_hardlink` / `cleanup_crossbrain_orphans` / `format_skill_md` / `marker_regex()` 由常量拼接）。新 Adapter 只提供差异：目标文件/备份文件/标记块内容；`l0_backup()` 默认 `None`。
+- 共享层在 `adapters/mod.rs`（`inject_marker_block` 四情况协议 / `write_breaking_hardlink` / `cleanup_crossbrain_orphans` / `format_skill_md` / `marker_regex()` 由常量拼接；卸载用 `remove_marker_block_from_file` / `delete_backup_files` / `skill_cleanup_actions`）。新 Adapter 只提供差异：目标文件/备份文件/标记块内容；`l0_backup()` 默认 `None`；**`uninstall()` 必须覆盖**（顺序：移块 → 删备份 → 清技能目录，删备份绝不能提前）。
 - 内联用户内容前必须 `ensure_no_marker_in_content()`，放在**构造内容那一层**。
 - 7 步清单见项目技能 `.workbuddy/skills/crossbrain-add-adapter`（v1.3.0）。
 - **Spike 优先用工具自带 dump 命令**（如 `codex debug prompt-input` 一次验 L0+L2）；须在**项目外**中立目录跑；没有 dump 才退回人工探针（用后清理+复跑回归）；文档说不清就二进制取证 `grep -a -o -E '.{0,140}AGENTS\.md.{0,140}' <tool>.exe`。
@@ -44,7 +44,8 @@
 ## 测试（本机有真实用户数据）
 
 - 全部跑临时目录 `with_base_dir(temp)`（进程号 + AtomicU32，Drop 清理）。「不误伤真实数据」= 复制真实目录跑真代码再比对零改动。「A 与 B 一致」断言输出相等。删改断言：动作前采样 + 比差异清单。
-- **源码文本断言必须反向验证一次**。
+- **源码文本断言必须反向验证一次**。命令名断言要写**完整调用形态**
+  （如 `invoke<X[]>("cmd")`，含收尾 `")`）——裸子串连 `_x` 变体都防不住（TASK-14 实测）。
 - **干跑不做机器状态假设**：`dryrun_sync` 已改预状态自适应（首注/更新分支）；新断言先问「真机上还成立吗」。
 - 每轮改动后必做安全回归（基线见下节；CLAUDE.md 断链是设计行为）。
 

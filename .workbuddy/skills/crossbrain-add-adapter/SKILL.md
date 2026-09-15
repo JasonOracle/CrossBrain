@@ -2,7 +2,7 @@
 name: crossbrain-add-adapter
 description: 为 CrossBrain（D:\project\memory1.0）接入一个新的 AI 工具 Adapter，把支持的工具数从 N 提到 N+1。当用户说「接入 X 工具 / 让向导识别 X / 加一个 X adapter / TASK-NN 是接 X」时使用。
 description_zh: "CrossBrain 新增 AI 工具 Adapter 的完整流程：从落点探测到文档同步与安全回归"
-version: 1.3.0
+version: 1.4.0
 agent_created: true
 allowed-tools: Read,Edit,Write,Grep,Glob,Bash,PowerShell
 display_name: "CrossBrain 接入新工具 Adapter"
@@ -121,6 +121,9 @@ fn cleanup_orphans(&self, active_slugs: &[String]) -> Result<CleanupReport, Adap
 | `write_breaking_hardlink(path, content)` | 断链三步法写文件（铁律 L-01 + 决策 D-03） |
 | `inject_marker_block(target, backup, block)` | 标记块四情况协议的完整实现 |
 | `restore_l0_backup(target, backup)` | 还原到首次注入前的内容（`ADR-15`）；自带「现场另存」与断链写入 |
+| `remove_marker_block_from_file(target, backup)` | 卸载用：移除标记块、块外内容原样保留（TASK-14）；含「整文件皆我方创建→删文件」特例 |
+| `delete_backup_files(backup, pre_restore)` | 卸载用：删两个备份文件；**只能在标记块成功移除之后调用** |
+| `skill_cleanup_actions(report)` | 把 `cleanup_orphans(&[])` 的报告转成卸载动作描述 |
 | `pre_restore_path(target)` | 算 `*.crossbrain-before-restore` 路径 |
 | `SyncL0Result` | `Silent` / `BackupCreated { backup_path }` |
 | `L0Backup` | `{ target_file, backup_file }`，由 `Adapter::l0_backup()` 返回 |
@@ -144,9 +147,31 @@ fn l0_backup(&self) -> Option<L0Backup> {
 形态一（目录型，写自己的独立文件）**不要覆盖**，默认的 `None` 会让它自动从
 「备份与还原」列表里消失，用户不会看到一条永远「无备份」的空条目。
 
+**额外要覆盖 `uninstall()`——所有形态都要**（TASK-14「一键卸载 / 去痕」，默认实现是空动作）：
+
+```rust
+fn uninstall(&self) -> Result<Vec<String>, AdapterError> {
+    let mut actions = Vec::new();
+    // 形态二/三（标记块注入型）：① 先移标记块，② 后删备份，③ 清技能目录
+    if let Some(desc) = remove_marker_block_from_file(&self.<l0_file>(), &self.backup_file())? {
+        actions.push(desc);
+    }
+    actions.extend(delete_backup_files(&self.backup_file(), &pre_restore_path(&self.<l0_file>())));
+    actions.extend(skill_cleanup_actions(self.cleanup_orphans(&[])?));
+    // 形态一（目录型）：① 删自己的独立规则文件（NotFound 静默跳过），② 清技能目录
+    Ok(actions)
+}
+```
+
+⚠️ **顺序是安全属性**：删备份必须在标记块成功移除**之后**（备份是用户唯一的
+还原手段）。返回值是**面向用户的动作描述**（含「你自己的内容原样保留」），
+不是调试日志。
+
 ⚠️ 本机**存在真实用户数据**：新工具接进来后必须跑安全回归 ——
-5 路硬链接目标 md5 全等 `47645f60…`、`~/.claude/CLAUDE.md` links=5、用户技能完好、
-真实目录不出现 `*.crossbrain-backup` / `*.crossbrain-before-restore` / `*.crossbrain-tmp`。
+硬链接组 md5 一致、用户技能完好、真实目录不出现 `*.crossbrain-backup` /
+`*.crossbrain-before-restore` / `*.crossbrain-tmp`、`~/.ai-profile` 零改动。
+**基线以 `.workbuddy/memory/MEMORY.md` 的「真实数据基线」为准**（真机同步过
+一次后 links=5 已变 4+1，别按旧数字判失败）。
 
 ---
 
@@ -294,6 +319,7 @@ for f in ~/.ai-memory/user_profile.md ~/.cursor/rules/user_profile.md \
 - [ ] L0 形态判定正确，没照搬别的形态
 - [ ] 共享层已用上，Adapter 里没有重复的断链/标记块/孤儿逻辑
 - [ ] 形态二 / 三 已覆盖 `l0_backup()`（形态一**不覆盖**，用默认 `None`）
+- [ ] 已覆盖 `uninstall()`（所有形态都要，顺序：移块 → 删备份 → 清技能目录）
 - [ ] 若新增了面向用户的界面文件，已加进 `ipc_contract` 的术语检查文件列表
 - [ ] 四处注册点全部落地（`grep` 逐项核验，别等编译）
 - [ ] 新测试全绿，`cargo test` 总数增加且 0 failed / 0 warning

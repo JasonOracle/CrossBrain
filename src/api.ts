@@ -173,6 +173,27 @@ export function markLinkNoticeShown(): Promise<void> {
   return invoke<void>("mark_link_notice_shown");
 }
 
+// ── 一键卸载 / 去痕（TASK-14）──
+
+/** 单个工具的卸载结果。 */
+export interface UninstallOutcome {
+  toolId: string;
+  displayName: string;
+  /** 实际执行的清理动作（面向用户的描述）。空列表 = 本来就没有痕迹。 */
+  actions: string[];
+}
+
+/**
+ * 一键卸载：清理所有工具侧的 CrossBrain 痕迹（标记块 / 独立规则文件 /
+ * 技能目录 / 备份文件），并删除运行状态文件。
+ *
+ * ⚠️ `~/.ai-profile/` 下的全局规则与技能知识是用户数据，**不在清理范围**。
+ * 前端必须先弹二次确认，用户确认后才允许调用。
+ */
+export function uninstallCrossbrain(): Promise<UninstallOutcome[]> {
+  return invoke<UninstallOutcome[]>("uninstall_crossbrain");
+}
+
 /** 执行完整同步。进度通过 {@link onSyncProgress} 推送。 */
 export function runSync(): Promise<SyncReport> {
   return invoke<SyncReport>("run_sync");

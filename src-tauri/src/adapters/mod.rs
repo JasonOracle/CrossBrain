@@ -162,6 +162,25 @@ pub trait Adapter: Send + Sync {
         None
     }
 
+    /// 卸载本工具侧的所有 CrossBrain 痕迹（TASK-14「一键卸载 / 去痕」）。
+    ///
+    /// 返回**实际执行**的清理动作清单（面向用户的中文描述，可直接展示）。
+    /// 空列表 = 本来就没有痕迹，同样视为成功。
+    ///
+    /// # 红线
+    ///
+    /// - 只允许删除 `crossbrain-` 命名空间内的内容与本 Adapter 自己写入的标记块；
+    /// - 标记块**外**的用户内容必须原样保留（验收硬性要求）；
+    /// - 未安装（目录不存在）时静默返回空列表，不算错误。
+    ///
+    /// # 为什么给默认实现
+    ///
+    /// 与 [`Adapter::l0_backup`] 同理：测试里的 Mock 不需要假装会卸载。
+    fn uninstall(&self) -> Result<Vec<String>, AdapterError> {
+        let _ = self;
+        Ok(Vec::new())
+    }
+
     /// 将 [`AdapterError`] 转为用户友好提示文字。
     ///
     /// 所有 UI 展示的错误文本**必须**经过此函数，不能直接展示系统错误字符串
@@ -613,6 +632,104 @@ pub fn inject_marker_block(
     write_breaking_hardlink(target_file, &new_content)?;
 
     Ok(result)
+}
+
+// ============================================================================
+// 卸载 / 去痕（TASK-14）
+// ============================================================================
+
+/// 从用户既有文件中移除 CrossBrain 标记块（TASK-14「一键卸载 / 去痕」）。
+///
+/// 返回 `Some(描述)` = 确实移除了标记块；`Ok(None)` = 文件不存在或本来就没有
+/// 标记块，无需改动。
+///
+/// # 与注入的对称性
+///
+/// 注入时写入 `{原文.trim_end()}\n\n{标记块}`；移除时把标记块整段删掉、
+/// 尾部归整为一个换行。**标记块外的内容一个字符都不动**——尾部的空白
+/// 在注入时本来就被 `trim_end` 丢过一次，不属于内容变化。
+///
+/// # 特例：移除后内容为空
+///
+/// - 有备份 → 写回备份内容（原始件可能本就是空文件）；
+/// - 无备份 → 说明整个文件都是我们创建的（注入走了「文件不存在」分支），
+///   直接删除文件——这才是完整的「去痕」。
+pub fn remove_marker_block_from_file(
+    target_file: &Path,
+    backup_file: &Path,
+) -> Result<Option<String>, AdapterError> {
+    if !target_file.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(target_file)
+        .map_err(|e| AdapterError::Other(format!("读取 {} 失败：{e}", target_file.display())))?;
+    if !has_marker_block(&content) {
+        return Ok(None);
+    }
+
+    // `NoExpand`：与注入侧同理，替换文本不做捕获组展开
+    let cleaned = marker_regex().replace_all(&content, NoExpand(""));
+    let trimmed = cleaned.trim_end();
+
+    if trimmed.is_empty() {
+        if backup_file.exists() {
+            // 走到这里说明原始件就是空的（否则移除后会剩下原文），写空即还原
+            write_breaking_hardlink(target_file, "")?;
+        } else {
+            fs::remove_file(target_file).map_err(|e| {
+                AdapterError::Other(format!("删除 {} 失败：{e}", target_file.display()))
+            })?;
+        }
+        return Ok(Some(format!(
+            "已从 {} 移除 CrossBrain 写入的内容",
+            target_file.display()
+        )));
+    }
+
+    let mut restored = trimmed.to_string();
+    restored.push('\n');
+    write_breaking_hardlink(target_file, &restored)?;
+    Ok(Some(format!(
+        "已从 {} 移除 CrossBrain 写入的内容（你自己的内容原样保留）",
+        target_file.display()
+    )))
+}
+
+/// 删除本工具的全部 CrossBrain 备份文件（`.crossbrain-backup` 与
+/// `.crossbrain-before-restore`）。不存在即静默跳过。
+///
+/// # 为什么敢删备份
+///
+/// 调用前提是标记块已**成功移除**、用户内容已回到主文件——备份此时只剩冗余
+/// 快照，「去痕」要求它们一并消失。**绝不在标记块移除之前调用**：
+/// 那会让用户失去唯一的还原手段。
+///
+/// 删除失败不视为致命错误（卸载主体已完成），但会出现在返回列表里提醒用户手动清理。
+pub fn delete_backup_files(backup_file: &Path, pre_restore_file: &Path) -> Vec<String> {
+    let mut removed = Vec::new();
+    for path in [backup_file, pre_restore_file] {
+        match fs::remove_file(path) {
+            Ok(()) => removed.push(format!("已删除备份 {}", path.display())),
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(_) => removed.push(format!(
+                "注意：备份 {} 未能删除，可稍后手动清理",
+                path.display()
+            )),
+        }
+    }
+    removed
+}
+
+/// 把孤儿清理报告转成卸载动作描述（TASK-14）。
+///
+/// 卸载时传空 `active_slugs` 给 [`cleanup_crossbrain_orphans`]，
+/// 所有 `crossbrain-*` 目录都会被删——这正好复用同一套「只认命名空间」的安全逻辑。
+pub fn skill_cleanup_actions(report: CleanupReport) -> Vec<String> {
+    if report.deleted_dirs.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!("已删除技能目录：{}", report.deleted_dirs.join("、"))]
+    }
 }
 
 // ============================================================================
@@ -1181,5 +1298,68 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("创建临时目录失败");
         dir
+    }
+
+    /// 卸载：注入过标记块的文件，移除后必须回到原文（尾部空白归整为单个换行），
+    /// 备份文件一并消失（TASK-14）。
+    #[test]
+    fn remove_marker_block_restores_original_and_deletes_backups() {
+        let dir = shared_temp_dir("remove-block");
+        let target = dir.join("CLAUDE.md");
+        let backup = dir.join("CLAUDE.md.crossbrain-backup");
+        fs::write(&target, "hello\n\n\n").unwrap();
+
+        inject_marker_block(&target, &backup, "<!-- CrossBrain:Start -->\n内容\n<!-- CrossBrain:End -->").unwrap();
+        assert!(has_marker_block(&fs::read_to_string(&target).unwrap()));
+        assert!(backup.exists());
+
+        let desc = remove_marker_block_from_file(&target, &backup)
+            .unwrap()
+            .expect("存在标记块，必须返回动作描述");
+        assert!(desc.contains("原样保留"), "描述要说明用户内容未动：{desc}");
+
+        let restored = fs::read_to_string(&target).unwrap();
+        assert_eq!(restored, "hello\n", "标记块外的内容必须原样保留");
+        assert!(!restored.contains("CrossBrain"), "不得残留任何标记串");
+        // 备份删除由 delete_backup_files 负责，这里模拟卸载完整调用
+        delete_backup_files(&backup, &pre_restore_path(&target));
+        assert!(!backup.exists(), "去痕后备份必须消失");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 卸载：整个文件都是我们创建的（注入走了「文件不存在」分支），
+    /// 移除后文件应被删除——留一个空文件不算「去痕」。
+    #[test]
+    fn remove_marker_block_deletes_file_we_created() {
+        let dir = shared_temp_dir("remove-created");
+        let target = dir.join("fresh.md");
+        let backup = dir.join("fresh.md.crossbrain-backup");
+
+        inject_marker_block(&target, &backup, "<!-- CrossBrain:Start -->\n块\n<!-- CrossBrain:End -->").unwrap();
+        // 该分支（文件不存在 → 直接写入）不产生备份
+        assert!(!backup.exists());
+
+        let desc = remove_marker_block_from_file(&target, &backup).unwrap();
+        assert!(desc.is_some());
+        assert!(!target.exists(), "我们创建的文件必须在移除后整个删掉");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 卸载：没有标记块的文件必须原样不动（Ok(None)），绝不能把用户文件清空。
+    #[test]
+    fn remove_marker_block_leaves_unrelated_file_alone() {
+        let dir = shared_temp_dir("remove-none");
+        let target = dir.join("plain.md");
+        let backup = dir.join("plain.md.crossbrain-backup");
+        fs::write(&target, "用户自己的内容\n").unwrap();
+
+        let desc = remove_marker_block_from_file(&target, &backup).unwrap();
+        assert!(desc.is_none());
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "用户自己的内容\n",
+            "无标记块的文件一个字节都不能动"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

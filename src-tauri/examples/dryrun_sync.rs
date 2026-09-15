@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use crossbrain_lib::adapters::antigravity::AntigravityAdapter;
 use crossbrain_lib::adapters::claude_code::ClaudeCodeAdapter;
 use crossbrain_lib::adapters::codex::CodexAdapter;
+use crossbrain_lib::adapters::{MARKER_END, MARKER_START};
 use crossbrain_lib::slug;
 use crossbrain_lib::sync::{scan_knowledge, KnowledgeItem, ToolDescriptor, ToolSyncStatus};
 use crossbrain_lib::{paths, sync};
@@ -635,6 +636,137 @@ fn main() {
             );
         }
         Err(e) => c.check(false, &format!("删除失败：{e}")),
+    }
+
+    // ── [13] 一键卸载 / 去痕（跑在副本目录上，放在最后：有破坏性） ──
+    println!("\n[13] 一键卸载 / 去痕（副本目录）");
+    {
+        let mut uninstall_tools = vec![
+            ToolDescriptor {
+                tool_id: "claude_code",
+                display_name: "Claude Code",
+                push_path: fake_claude.clone(),
+                adapter: Box::new(ClaudeCodeAdapter::with_base_dir(fake_claude.clone())),
+            },
+            ToolDescriptor {
+                tool_id: "antigravity",
+                display_name: "Antigravity IDE",
+                push_path: fake_gemini.clone(),
+                adapter: Box::new(AntigravityAdapter::with_base_dir(fake_gemini.clone())),
+            },
+            ToolDescriptor {
+                tool_id: "codex",
+                display_name: "Codex",
+                push_path: fake_codex.clone(),
+                adapter: Box::new(CodexAdapter::with_base_dir(fake_codex.clone())),
+            },
+        ];
+
+        // 卸载前把「标记块外的用户内容」摘出来作为期望值（不依赖正则，纯字符串定位）
+        fn user_part(content: &str) -> String {
+            match (content.find(MARKER_START), content.find(MARKER_END)) {
+                (Some(s), Some(e)) => {
+                    let mut out = String::new();
+                    out.push_str(&content[..s]);
+                    out.push_str(&content[e + MARKER_END.len()..]);
+                    out.trim_end().to_string()
+                }
+                _ => content.trim_end().to_string(),
+            }
+        }
+
+        let claude_before = fs::read_to_string(fake_claude.join("CLAUDE.md")).unwrap_or_default();
+        let codex_before = fs::read_to_string(fake_codex.join("AGENTS.md")).unwrap_or_default();
+
+        // 期望值与实现同构、且对前置状态自适应：
+        // - 无标记块 → 文件原样不动（前面 [10] 的还原可能已把块移除）
+        // - 有标记块 → 移除后 = 标记块外内容；内容为空（原文件本就空）得空文件，
+        //   非空则尾部归整为单个换行
+        fn expected_after_uninstall(before: &str) -> String {
+            if !before.contains(MARKER_START) {
+                return before.to_string();
+            }
+            let up = user_part(before);
+            if up.is_empty() {
+                String::new()
+            } else {
+                format!("{up}\n")
+            }
+        }
+        let expected_claude = expected_after_uninstall(&claude_before);
+        let expected_codex = expected_after_uninstall(&codex_before);
+
+        match sync::uninstall_all_for(&mut uninstall_tools) {
+            Ok(outcomes) => {
+                c.check(outcomes.len() == 3, "卸载应覆盖全部 3 个工具");
+                for outcome in &outcomes {
+                    println!(
+                        "      {}：{}",
+                        outcome.display_name,
+                        if outcome.actions.is_empty() {
+                            "（无动作）".to_string()
+                        } else {
+                            outcome.actions.join("；")
+                        }
+                    );
+                }
+            }
+            Err(e) => c.check(false, &format!("卸载失败：{e}")),
+        }
+
+        // Claude：标记块消失、用户内容原样保留
+        let claude_after = fs::read_to_string(fake_claude.join("CLAUDE.md")).unwrap_or_default();
+        c.check(
+            !claude_after.contains(MARKER_START) && !claude_after.contains(MARKER_END),
+            "CLAUDE.md 不得残留任何标记串",
+        );
+        c.check(
+            claude_after == expected_claude,
+            "CLAUDE.md 标记块外内容必须原样保留",
+        );
+        c.check(
+            !fake_claude.join("CLAUDE.md.crossbrain-backup").exists(),
+            "Claude 备份文件必须被删除（去痕）",
+        );
+
+        // Codex：同上
+        let codex_after = fs::read_to_string(fake_codex.join("AGENTS.md")).unwrap_or_default();
+        c.check(
+            !codex_after.contains(MARKER_START) && codex_after == expected_codex,
+            "Codex AGENTS.md 移除标记块后回到用户原文",
+        );
+        c.check(
+            !fake_codex.join("AGENTS.md.crossbrain-backup").exists(),
+            "Codex 备份文件必须被删除（去痕）",
+        );
+
+        // Antigravity：独立规则文件消失
+        c.check(
+            !fake_gemini.join("rules").join("crossbrain-L0.md").exists(),
+            "Antigravity 的独立规则文件必须被删除",
+        );
+
+        // 三个 skills 目录都不得残留 crossbrain-* 目录
+        for (name, dir) in [
+            ("Claude", fake_claude.join("skills")),
+            ("Antigravity", fake_gemini.join("skills")),
+            ("Codex", fake_codex.join("skills")),
+        ] {
+            let leftovers = crossbrain_dirs(&dir).len();
+            c.check(
+                leftovers == 0,
+                &format!("{name} 的 skills 目录不得残留 crossbrain-* 目录（剩 {leftovers} 个）"),
+            );
+        }
+
+        // 幂等：没有痕迹时再卸载一次，全部返回空动作且不报错
+        match sync::uninstall_all_for(&mut uninstall_tools) {
+            Ok(outcomes) => c.check(
+                outcomes.iter().all(|o| o.actions.is_empty()),
+                "第二次卸载应无事可做（幂等）",
+            ),
+            Err(e) => c.check(false, &format!("第二次卸载失败：{e}")),
+        }
     }
 
     // ── 收尾 ──

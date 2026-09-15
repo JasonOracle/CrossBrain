@@ -404,6 +404,70 @@ pub fn restore_backup_for(tools: &[ToolDescriptor], tool_id: &str) -> Result<Str
     }
 }
 
+// ============================================================================
+// 一键卸载 / 去痕（TASK-14）
+// ============================================================================
+
+/// 一键卸载时单个工具的清理结果。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallOutcome {
+    pub tool_id: String,
+    pub display_name: String,
+    /// 实际执行的清理动作（面向用户的中文描述，可直接展示）。
+    /// 空列表 = 本来就没有需要清理的内容。
+    pub actions: Vec<String>,
+}
+
+/// 对全部支持的工具执行卸载（生产入口）。
+///
+/// ⚠️ **只清理各工具侧的痕迹**（标记块 / 独立规则文件 / `crossbrain-*` 技能目录 /
+/// 备份文件）。`~/.ai-profile/` 下的 `global/rules.md` 与 `knowledge/` 是用户
+/// 自己的数据，卸载**不碰**；状态文件的删除由命令层在全部成功后执行。
+pub fn uninstall_all() -> Result<Vec<UninstallOutcome>, String> {
+    uninstall_all_for(&mut build_tools())
+}
+
+/// [`uninstall_all`] 的可注入变体：由调用方提供工具清单（干跑注入副本用）。
+///
+/// 语义：逐工具执行；某个工具失败即中止并报错——卸载是**幂等**的，
+/// 已清理过的工具重跑只会返回空动作，用户修复问题后重试即可续上。
+pub fn uninstall_all_for(tools: &mut [ToolDescriptor]) -> Result<Vec<UninstallOutcome>, String> {
+    let mut outcomes = Vec::new();
+
+    for tool in tools.iter_mut() {
+        let installed = tool
+            .adapter
+            .detect()
+            .map_err(|e| user_facing_error(&*tool.adapter, &e))?;
+        if !installed {
+            // 未安装 = 无痕迹，如实告知而不是悄悄消失
+            outcomes.push(UninstallOutcome {
+                tool_id: tool.tool_id.to_string(),
+                display_name: tool.display_name.to_string(),
+                actions: vec!["未安装，没有需要清理的内容".to_string()],
+            });
+            continue;
+        }
+
+        let actions = tool.adapter.uninstall().map_err(|e| {
+            format!(
+                "清理 {} 时失败：{}。已完成的清理不会重复执行，修复问题后可直接重试。",
+                tool.display_name,
+                user_facing_error(&*tool.adapter, &e)
+            )
+        })?;
+
+        outcomes.push(UninstallOutcome {
+            tool_id: tool.tool_id.to_string(),
+            display_name: tool.display_name.to_string(),
+            actions,
+        });
+    }
+
+    Ok(outcomes)
+}
+
 /// 把文件系统时间戳格式化成状态栏同款本地时间（`YYYY-MM-DD HH:MM`）。
 ///
 /// 铁律 L-03：时间一律来自 `chrono`，**不得调用 shell 的 `date`**。

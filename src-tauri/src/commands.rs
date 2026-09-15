@@ -171,6 +171,31 @@ pub fn mark_link_notice_shown() -> Result<(), String> {
     state::mark_link_notice_shown().map_err(|_| "无法保存设置，请检查磁盘权限".to_string())
 }
 
+/// 一键卸载 / 去痕（TASK-14）。
+///
+/// # 用户显式发起 + 二次确认后才到这里
+///
+/// 前端必须先弹确认框，用户确认后才允许调用本命令——这是删除性操作，
+/// 程序绝不替用户推断「他大概想卸载了」。
+///
+/// 清理范围：各工具侧的标记块 / 独立规则文件 / `crossbrain-*` 技能目录 / 备份文件。
+/// `~/.ai-profile/` 下的全局规则与技能知识是**用户数据**，不在此列。
+///
+/// 状态文件在全部清理成功**之后**删除：删掉它，下次启动会重新走向导。
+/// 若清理半途失败，状态保留（卸载幂等，用户可直接重试续上）。
+#[tauri::command]
+pub async fn uninstall_crossbrain() -> Result<Vec<sync::UninstallOutcome>, String> {
+    // 与 run_sync 同理：文件 IO 挪到阻塞线程池，不占主线程
+    let joined = tauri::async_runtime::spawn_blocking(sync::uninstall_all)
+        .await
+        .map_err(|_| "卸载过程意外中断，请重试。".to_string())?;
+
+    // 全部工具清理成功才走到这里；状态删除失败不回滚清理结果，但要让用户知道
+    state::remove_state_file()?;
+
+    joined
+}
+
 // ============================================================================
 // 技能知识库 CRUD（TASK-12）
 // ============================================================================

@@ -1964,16 +1964,77 @@ pub fn is_git_available() -> bool {
 #### ✅ 验收检查清单
 
 ```
-[ ] 设置页中有「卸载 CrossBrain」或「去痕」按钮
-[ ] 点击后弹出二次确认弹窗
-[ ] 确认后执行：
+[x] 设置页中有「卸载 CrossBrain」或「去痕」按钮
+[x] 点击后弹出二次确认弹窗
+[x] 确认后执行：
     - 删除 ~/.gemini/config/rules/crossbrain-L0.md
     - 删除 ~/.gemini/config/skills/ 下所有 crossbrain-* 目录
     - 从 ~/.claude/CLAUDE.md 中移除 CrossBrain 标记块（标记块外内容保留）
     - 删除 ~/.claude/skills/ 下所有 crossbrain-* 目录
-[ ] 卸载完成后提示成功
-[ ] 用户原有 CLAUDE.md 内容（标记块外的部分）完整保留
+[x] 卸载完成后提示成功
+[x] 用户原有 CLAUDE.md 内容（标记块外的部分）完整保留
 ```
+
+#### ⚠️ 实施修正（2026-09-15 10:30，TASK-14）
+
+1. **验收清单的覆盖面是早期口径，已扩到全部 3 个工具**：原文只列了 Gemini
+   （Antigravity）与 Claude Code——那是 PRD 第 3 节只支持两个工具时写的。
+   Codex（TASK-18 增补）同样注入标记块、同样有技能目录与备份，卸载必须一并
+   清理，否则「去痕」名不副实。三工具各自实现 `Adapter::uninstall()`，
+   编排层（`uninstall_all_for`）不分支。
+2. **删备份的时机是安全属性，不是实现细节**：`.crossbrain-backup` 是用户
+   唯一的「回到最初」手段，必须在标记块**成功移除之后**才允许删除
+   （`delete_backup_files` 文档已写死这条调用前提）。顺序反了 = 移除失败时
+   用户既丢了块内引用也没了备份。
+3. **尾部空白归整为单个换行**：注入时 `{原文.trim_end()}\n\n{块}` 本来就丢过
+   原文的尾部空白，移除时对称地 `trim_end()` 后补单个换行。字符内容零变化。
+4. **「整个文件都是我们建的」特例**：移除后内容为空时——有备份 → 写回备份
+   （原始件本就是空文件）；无备份 → 说明文件由注入的「文件不存在」分支创建，
+   **删除整个文件**，否则留一个空文件不算去痕。
+5. **用户数据明确不在清理范围**：`~/.ai-profile/` 下的 `global/rules.md` 与
+   `knowledge/` 是用户自己的数据，卸载不碰；确认弹窗里明说了这一点。
+   验收原文没提，属于必须向用户交代的边界。
+6. **状态文件最后删、由命令层负责**：`.crossbrain-state.json` 是本机运行痕迹，
+   卸载成功后删除 → 下次启动回退默认值 → 重新走向导。放在 `uninstall_all`
+   **成功之后**（命令层执行）：半途失败时保留状态，用户重试续上（卸载幂等）。
+   前端 `App.vue` 监听 `uninstalled` 事件重读本机状态，主工作台自然切回向导。
+7. **单工具失败即中止**：报错文案说明「已完成的清理不会重复执行，修复后可直接
+   重试」。卸载幂等，重试安全。
+8. **反向验证抓到一条弱断言**：`uninstall_requires_confirmation_and_wiring_matches`
+   原本只查 api.ts 是否包含子串 `uninstall_crossbrain`——变异成
+   `uninstall_crossbrain_x` 后测试**照样通过**（子串仍命中）。已改为断言完整
+   调用形态 `invoke<UninstallOutcome[]>("uninstall_crossbrain")`。
+   **教训：命令名断言必须含收尾的 `")`，裸子串永远防不住改名变异。**
+9. **干跑 [13] 的期望值必须对前置状态自适应**：[10] 节的还原已把副本 CLAUDE.md
+   的标记块移除，[13] 不能假设「必有标记块」；Codex 的原始件是空文件，移除后
+   期望是空串而非单个换行。与 TASK-11 修干跑的教训同源：断言先问
+   「这个前提在前面的步骤之后还成立吗」。
+
+#### ✅ 实施记录（2026-09-15 10:30，TASK-14）
+
+- `adapters/mod.rs`：trait 新增 `uninstall()`（默认空实现）；共享层新增
+  `remove_marker_block_from_file()`（与注入对称的移除，含空文件特例）、
+  `delete_backup_files()`、`skill_cleanup_actions()`；测试 +3。
+- `claude_code.rs` / `codex.rs`：`uninstall()` = 移标记块 → 删备份 → 清技能目录；
+  `antigravity.rs`：删独立规则文件 → 清技能目录。各 +1 全周期测试
+  （含「用户自建技能 / `skills/.system/` 不被误删」断言）。
+- `state.rs`：`remove_state_file()`（+ 可注入变体 `_at`，与 `load_from` 同模式）；
+  测试 +1（幂等 + 删除后回默认值）。
+- `sync.rs`：`UninstallOutcome` DTO + `uninstall_all()` / `uninstall_all_for()`。
+- `commands.rs`：`uninstall_crossbrain`（async + spawn_blocking，成功后删状态文件）；
+  `lib.rs` 注册。
+- 前端：`api.ts` 加 `UninstallOutcome` / `uninstallCrossbrain()`；
+  `MainView.vue` 设置页加「卸载 CrossBrain」危险区 + 二次确认弹窗（写明清理
+  范围与保留范围）+ 成功 Toast + `emit("uninstalled")`；`App.vue` 监听后重读
+  启动状态切回向导。
+- 契约测试：DTO 字段对 +3、`uninstall_requires_confirmation_and_wiring_matches`
+  （两段式确认 / 命令名完整形态 / 状态文件删除在命令层），已反向验证。
+- `dryrun_sync` 新增 [13] 节（放最后，有破坏性）：三工具卸载、标记块外内容
+  保留、备份/L0/技能目录清空、幂等重跑，共 13 节。
+- 验证：`cargo test` **136 passed / 0 failed / 0 warning**（+8）；
+  `dryrun_sync` 13 节 0 项未通过（真实目录 2950 项零改动）；`pnpm build` 通过。
+- 遗留：GUI 点击走查并入 TASK-15；卸载不删 `~/.ai-profile` 用户数据（设计使然，
+  弹窗已说明）。
 
 ---
 
